@@ -17,7 +17,7 @@ connectDB();
 
 initWebRoutes(app);
 
-let port = process.env.PORT || 6969;
+let port = process.env.PORT || 8088;
 
 app.listen(port, () => {
     console.log("Backend Nodejs (MongoDB) đang chạy tại port: " + port);
