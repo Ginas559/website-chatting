@@ -20,7 +20,7 @@
             const data = {
                 email: localStorage.getItem('email'),
                 tempToken: localStorage.getItem('tempToken'),
-                otp: document.getElementById('otpCode').value
+                otp: document.getElementById('otpCode').value.trim()
             };
             const res = await fetch('/api/verify-otp', {
                 method: 'POST',

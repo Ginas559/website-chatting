@@ -10,6 +10,9 @@ Connection String: `mongodb://localhost:27017/btvn01_mongodb`
 
 **Các trang UI (Glassmorphism & Light Theme):**
 Trang Đăng nhập: http://localhost:8088/login-page
+Trang Xác thực OTP đăng ký: http://localhost:8088/verify-otp-page
+Trang Quên mật khẩu: http://localhost:8088/forgot-password-page
+Trang Nhập OTP và đặt lại mật khẩu: http://localhost:8088/reset-password-page
 
 **Các API Endpoints:**
 - `POST /api/login` - Đăng nhập (có Rate Limit & Validation)
