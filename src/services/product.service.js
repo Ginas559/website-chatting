@@ -3,6 +3,8 @@ import Product from '../models/product.model';
 const PRODUCT_SELECT_FIELDS =
     'name slug brand category image images price oldPrice discount stock soldCount rating description shortDescription isPromotion isLatest isBestSeller';
 
+const DEFAULT_PRODUCT_PAGE_SIZE = 12;
+
 const mapProduct = (product) => ({
     id: product._id,
     name: product.name,
@@ -44,6 +46,8 @@ export const getProductsSearchService = async (query = {}) => {
         promotion,
         latest,
         bestseller,
+        page,
+        limit,
     } = query;
 
     const filter = { isActive: true };
@@ -106,12 +110,31 @@ export const getProductsSearchService = async (query = {}) => {
         }
     })();
 
-    const products = await Product.find(filter)
-        .sort(sortOption)
-        .select(PRODUCT_SELECT_FIELDS)
-        .lean();
+    const rawPage = Number(page) || 1;
+    const rawLimit = Number(limit) || DEFAULT_PRODUCT_PAGE_SIZE;
+    const safePage = Math.max(rawPage, 1);
+    const safeLimit = Math.min(Math.max(rawLimit, 1), DEFAULT_PRODUCT_PAGE_SIZE);
+    const skip = (safePage - 1) * safeLimit;
 
-    return products.map(mapProduct);
+    const [total, products] = await Promise.all([
+        Product.countDocuments(filter),
+        Product.find(filter)
+            .sort(sortOption)
+            .skip(skip)
+            .limit(safeLimit)
+            .select(PRODUCT_SELECT_FIELDS)
+            .lean(),
+    ]);
+
+    const items = products.map(mapProduct);
+
+    return {
+        items,
+        total,
+        page: safePage,
+        limit: safeLimit,
+        hasMore: skip + items.length < total,
+    };
 };
 
 export const getHomeSections = async (limit = 8) => {

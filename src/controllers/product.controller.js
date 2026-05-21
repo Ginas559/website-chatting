@@ -72,12 +72,12 @@ export const getProductCategoriesController = async (req, res) => {
 
 export const searchProducts = async (req, res) => {
     try {
-        const products = await getProductsSearchService(req.query || {});
+        const result = await getProductsSearchService(req.query || {});
 
         return res.status(200).json({
             errCode: 0,
             errMessage: 'Lấy danh sách sản phẩm thành công',
-            data: products,
+            data: result,
         });
     } catch (error) {
         console.error('Product Search Controller Error:', error);
