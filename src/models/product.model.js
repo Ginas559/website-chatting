@@ -27,6 +27,10 @@ const productSchema = new mongoose.Schema(
     }
 );
 
+productSchema.index({ isActive: 1, isBestSeller: 1, soldCount: -1, views: -1, rating: -1 });
+productSchema.index({ isActive: 1, views: -1, soldCount: -1, rating: -1 });
+productSchema.index({ isActive: 1, soldCount: -1, rating: -1 });
+
 const Product = mongoose.model('Product', productSchema);
 
 export default Product;

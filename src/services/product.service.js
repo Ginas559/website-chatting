@@ -3,8 +3,12 @@ import Product from '../models/product.model';
 const PRODUCT_SELECT_FIELDS =
     'name slug brand category image images price oldPrice discount stock soldCount rating views description shortDescription isPromotion isLatest isBestSeller';
 
-const DEFAULT_PRODUCT_PAGE_SIZE = 12;
+const DEFAULT_PAGE = 1;
+const DEFAULT_SEARCH_PAGE_SIZE = 12;
 const DEFAULT_HOME_SECTION_PAGE_SIZE = 10;
+const MAX_SEARCH_PAGE_SIZE = 12;
+const MAX_HOME_SECTION_PAGE_SIZE = 10;
+const RELATED_PRODUCTS_LIMIT = 8;
 
 const mapProduct = (product) => ({
     id: product._id,
@@ -30,12 +34,70 @@ const mapProduct = (product) => ({
 
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-export const getProductCategories = async () => {
-    const categories = await Product.distinct('category', { isActive: true });
-    return categories.filter(Boolean).sort((a, b) => a.localeCompare(b, 'vi'));
+const toPositiveInteger = (value, fallback) => {
+    const parsedValue = Number(value);
+
+    if (!Number.isFinite(parsedValue)) {
+        return fallback;
+    }
+
+    return Math.trunc(parsedValue);
 };
 
-export const getProductsSearchService = async (query = {}) => {
+const parsePagination = ({ page, limit, defaultLimit, maxLimit }) => {
+    const safePage = Math.max(toPositiveInteger(page, DEFAULT_PAGE), DEFAULT_PAGE);
+    const rawLimit = toPositiveInteger(limit, defaultLimit);
+    const safeLimit = Math.min(Math.max(rawLimit, 1), maxLimit);
+    const skip = (safePage - 1) * safeLimit;
+
+    return {
+        page: safePage,
+        limit: safeLimit,
+        skip,
+    };
+};
+
+const buildPagination = (page, limit, total) => ({
+    page,
+    limit,
+    total,
+    totalPages: total > 0 ? Math.ceil(total / limit) : 1,
+});
+
+const getPaginatedProducts = async ({ filter, sort, page, limit, defaultLimit, maxLimit }) => {
+    const paginationInput = parsePagination({
+        page,
+        limit,
+        defaultLimit,
+        maxLimit,
+    });
+
+    const [total, products] = await Promise.all([
+        Product.countDocuments(filter),
+        Product.find(filter)
+            .sort(sort)
+            .skip(paginationInput.skip)
+            .limit(paginationInput.limit)
+            .select(PRODUCT_SELECT_FIELDS)
+            .lean(),
+    ]);
+
+    const items = products.map(mapProduct);
+    const pagination = buildPagination(paginationInput.page, paginationInput.limit, total);
+
+    return {
+        items,
+        total,
+        hasMore: paginationInput.skip + items.length < total,
+        pagination,
+        page: pagination.page,
+        limit: pagination.limit,
+        totalPages: pagination.totalPages,
+    };
+};
+
+const buildSearchFilter = (query = {}) => {
+    const filter = { isActive: true };
     const {
         q,
         category,
@@ -44,15 +106,10 @@ export const getProductsSearchService = async (query = {}) => {
         maxPrice,
         minRating,
         inStock,
-        sort,
         promotion,
         latest,
         bestseller,
-        page,
-        limit,
     } = query;
-
-    const filter = { isActive: true };
 
     if (q) {
         const rawQuery = String(q).trim();
@@ -87,88 +144,89 @@ export const getProductsSearchService = async (query = {}) => {
 
     if (minPrice || maxPrice) {
         filter.price = {};
-        if (minPrice) filter.price.$gte = Number(minPrice);
-        if (maxPrice) filter.price.$lte = Number(maxPrice);
+
+        if (minPrice) {
+            filter.price.$gte = Number(minPrice);
+        }
+
+        if (maxPrice) {
+            filter.price.$lte = Number(maxPrice);
+        }
     }
 
-    if (minRating) filter.rating = { $gte: Number(minRating) };
-    if (inStock === 'true') filter.stock = { $gt: 0 };
-    if (promotion === 'true') filter.isPromotion = true;
-    if (latest === 'true') filter.isLatest = true;
-    if (bestseller === 'true') filter.isBestSeller = true;
+    if (minRating) {
+        filter.rating = { $gte: Number(minRating) };
+    }
 
-    const sortOption = (() => {
-        switch (sort) {
-            case 'price-asc':
-                return { price: 1 };
-            case 'price-desc':
-                return { price: -1 };
-            case 'popular':
-                return { soldCount: -1 };
-            case 'rating':
-                return { rating: -1 };
-            default:
-                return { createdAt: -1 };
-        }
-    })();
+    if (inStock === 'true') {
+        filter.stock = { $gt: 0 };
+    }
 
-    const rawPage = Number(page) || 1;
-    const rawLimit = Number(limit) || DEFAULT_PRODUCT_PAGE_SIZE;
-    const safePage = Math.max(rawPage, 1);
-    const safeLimit = Math.min(Math.max(rawLimit, 1), DEFAULT_PRODUCT_PAGE_SIZE);
-    const skip = (safePage - 1) * safeLimit;
+    if (promotion === 'true') {
+        filter.isPromotion = true;
+    }
 
-    const [total, products] = await Promise.all([
-        Product.countDocuments(filter),
-        Product.find(filter)
-            .sort(sortOption)
-            .skip(skip)
-            .limit(safeLimit)
-            .select(PRODUCT_SELECT_FIELDS)
-            .lean(),
-    ]);
+    if (latest === 'true') {
+        filter.isLatest = true;
+    }
 
-    const items = products.map(mapProduct);
+    if (bestseller === 'true') {
+        filter.isBestSeller = true;
+    }
+
+    return filter;
+};
+
+const buildSearchSort = (sort) => {
+    switch (sort) {
+        case 'price-asc':
+            return { price: 1 };
+        case 'price-desc':
+            return { price: -1 };
+        case 'popular':
+            return { soldCount: -1, views: -1, rating: -1 };
+        case 'rating':
+            return { rating: -1, soldCount: -1, views: -1 };
+        default:
+            return { createdAt: -1 };
+    }
+};
+
+export const getProductCategories = async () => {
+    const categories = await Product.distinct('category', { isActive: true });
+    return categories.filter(Boolean).sort((a, b) => a.localeCompare(b, 'vi'));
+};
+
+export const getProductsSearchService = async (query = {}) => {
+    const filter = buildSearchFilter(query);
+    const sortOption = buildSearchSort(query.sort);
+    const paginatedProducts = await getPaginatedProducts({
+        filter,
+        sort: sortOption,
+        page: query.page,
+        limit: query.limit,
+        defaultLimit: DEFAULT_SEARCH_PAGE_SIZE,
+        maxLimit: MAX_SEARCH_PAGE_SIZE,
+    });
 
     return {
-        items,
-        total,
-        page: safePage,
-        limit: safeLimit,
-        hasMore: skip + items.length < total,
+        ...paginatedProducts,
     };
 };
 
 const getPagedSectionProducts = async ({ filter, sort, page = 1, limit = DEFAULT_HOME_SECTION_PAGE_SIZE }) => {
-    const safePage = Math.max(Number(page) || 1, 1);
-    const safeLimit = Math.min(Math.max(Number(limit) || DEFAULT_HOME_SECTION_PAGE_SIZE, 1), DEFAULT_HOME_SECTION_PAGE_SIZE);
-    const skip = (safePage - 1) * safeLimit;
-
-    const [total, products] = await Promise.all([
-        Product.countDocuments(filter),
-        Product.find(filter)
-            .sort(sort)
-            .skip(skip)
-            .limit(safeLimit)
-            .select(PRODUCT_SELECT_FIELDS)
-            .lean(),
-    ]);
-
-    const items = products.map(mapProduct);
-    const totalPages = Math.max(1, Math.ceil(total / safeLimit));
-
-    return {
-        items,
-        total,
-        page: safePage,
-        limit: safeLimit,
-        totalPages,
-        hasMore: safePage < totalPages,
-    };
+    return getPaginatedProducts({
+        filter,
+        sort,
+        page,
+        limit,
+        defaultLimit: DEFAULT_HOME_SECTION_PAGE_SIZE,
+        maxLimit: MAX_HOME_SECTION_PAGE_SIZE,
+    });
 };
 
 export const getHomeSections = async ({ limit = DEFAULT_HOME_SECTION_PAGE_SIZE, promotionPage = 1, latestPage = 1, bestsellerPage = 1, mostViewedPage = 1 } = {}) => {
-    const safeLimit = Math.min(Math.max(Number(limit) || DEFAULT_HOME_SECTION_PAGE_SIZE, 1), DEFAULT_HOME_SECTION_PAGE_SIZE);
+    const safeLimit = Math.min(Math.max(toPositiveInteger(limit, DEFAULT_HOME_SECTION_PAGE_SIZE), 1), MAX_HOME_SECTION_PAGE_SIZE);
 
     const [promotion, latest, bestseller, mostViewed] = await Promise.all([
         getPagedSectionProducts({
@@ -205,6 +263,24 @@ export const getHomeSections = async ({ limit = DEFAULT_HOME_SECTION_PAGE_SIZE, 
     };
 };
 
+export const getBestSellerProducts = async ({ page = 1, limit = DEFAULT_HOME_SECTION_PAGE_SIZE } = {}) => {
+    return getPagedSectionProducts({
+        filter: { isActive: true, isBestSeller: true },
+        sort: { soldCount: -1, views: -1, rating: -1 },
+        page,
+        limit,
+    });
+};
+
+export const getMostViewedProducts = async ({ page = 1, limit = DEFAULT_HOME_SECTION_PAGE_SIZE } = {}) => {
+    return getPagedSectionProducts({
+        filter: { isActive: true },
+        sort: { views: -1, soldCount: -1, rating: -1 },
+        page,
+        limit,
+    });
+};
+
 export const getProductDetailBySlug = async (slug) => {
     const product = await Product.findOneAndUpdate(
         { slug, isActive: true },
@@ -224,7 +300,7 @@ export const getProductDetailBySlug = async (slug) => {
         category: product.category,
     })
         .sort({ soldCount: -1, rating: -1 })
-        .limit(8)
+        .limit(RELATED_PRODUCTS_LIMIT)
         .select(PRODUCT_SELECT_FIELDS)
         .lean();
 
