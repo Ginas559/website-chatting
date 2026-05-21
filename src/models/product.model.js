@@ -19,6 +19,7 @@ const productSchema = new mongoose.Schema(
         isPromotion: { type: Boolean, default: false },
         isLatest: { type: Boolean, default: false },
         isBestSeller: { type: Boolean, default: false },
+        views: { type: Number, default: 0, min: 0 },
         isActive: { type: Boolean, default: true },
     },
     {

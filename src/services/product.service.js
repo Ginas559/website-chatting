@@ -1,9 +1,10 @@
 import Product from '../models/product.model';
 
 const PRODUCT_SELECT_FIELDS =
-    'name slug brand category image images price oldPrice discount stock soldCount rating description shortDescription isPromotion isLatest isBestSeller';
+    'name slug brand category image images price oldPrice discount stock soldCount rating views description shortDescription isPromotion isLatest isBestSeller';
 
 const DEFAULT_PRODUCT_PAGE_SIZE = 12;
+const DEFAULT_HOME_SECTION_PAGE_SIZE = 10;
 
 const mapProduct = (product) => ({
     id: product._id,
@@ -18,6 +19,7 @@ const mapProduct = (product) => ({
     discount: product.discount,
     stock: product.stock,
     sold: product.soldCount,
+    views: product.views || 0,
     rating: product.rating,
     description: product.description || product.shortDescription,
     shortDescription: product.shortDescription,
@@ -137,34 +139,78 @@ export const getProductsSearchService = async (query = {}) => {
     };
 };
 
-export const getHomeSections = async (limit = 8) => {
-    const [promotion, latest, bestseller] = await Promise.all([
-        Product.find({ isActive: true, isPromotion: true })
-            .sort({ discount: -1, createdAt: -1 })
-            .limit(limit)
-            .select(PRODUCT_SELECT_FIELDS)
-            .lean(),
-        Product.find({ isActive: true, isLatest: true })
-            .sort({ createdAt: -1 })
-            .limit(limit)
-            .select(PRODUCT_SELECT_FIELDS)
-            .lean(),
-        Product.find({ isActive: true, isBestSeller: true })
-            .sort({ soldCount: -1, rating: -1 })
-            .limit(limit)
+const getPagedSectionProducts = async ({ filter, sort, page = 1, limit = DEFAULT_HOME_SECTION_PAGE_SIZE }) => {
+    const safePage = Math.max(Number(page) || 1, 1);
+    const safeLimit = Math.min(Math.max(Number(limit) || DEFAULT_HOME_SECTION_PAGE_SIZE, 1), DEFAULT_HOME_SECTION_PAGE_SIZE);
+    const skip = (safePage - 1) * safeLimit;
+
+    const [total, products] = await Promise.all([
+        Product.countDocuments(filter),
+        Product.find(filter)
+            .sort(sort)
+            .skip(skip)
+            .limit(safeLimit)
             .select(PRODUCT_SELECT_FIELDS)
             .lean(),
     ]);
 
+    const items = products.map(mapProduct);
+    const totalPages = Math.max(1, Math.ceil(total / safeLimit));
+
     return {
-        promotion: promotion.map(mapProduct),
-        latest: latest.map(mapProduct),
-        bestseller: bestseller.map(mapProduct),
+        items,
+        total,
+        page: safePage,
+        limit: safeLimit,
+        totalPages,
+        hasMore: safePage < totalPages,
+    };
+};
+
+export const getHomeSections = async ({ limit = DEFAULT_HOME_SECTION_PAGE_SIZE, promotionPage = 1, latestPage = 1, bestsellerPage = 1, mostViewedPage = 1 } = {}) => {
+    const safeLimit = Math.min(Math.max(Number(limit) || DEFAULT_HOME_SECTION_PAGE_SIZE, 1), DEFAULT_HOME_SECTION_PAGE_SIZE);
+
+    const [promotion, latest, bestseller, mostViewed] = await Promise.all([
+        getPagedSectionProducts({
+            filter: { isActive: true, isPromotion: true },
+            sort: { discount: -1, createdAt: -1 },
+            page: promotionPage,
+            limit: safeLimit,
+        }),
+        getPagedSectionProducts({
+            filter: { isActive: true, isLatest: true },
+            sort: { createdAt: -1 },
+            page: latestPage,
+            limit: safeLimit,
+        }),
+        getPagedSectionProducts({
+            filter: { isActive: true, isBestSeller: true },
+            sort: { soldCount: -1, rating: -1, createdAt: -1 },
+            page: bestsellerPage,
+            limit: safeLimit,
+        }),
+        getPagedSectionProducts({
+            filter: { isActive: true },
+            sort: { views: -1, soldCount: -1, rating: -1, createdAt: -1 },
+            page: mostViewedPage,
+            limit: safeLimit,
+        }),
+    ]);
+
+    return {
+        promotion,
+        latest,
+        bestseller,
+        mostViewed,
     };
 };
 
 export const getProductDetailBySlug = async (slug) => {
-    const product = await Product.findOne({ slug, isActive: true })
+    const product = await Product.findOneAndUpdate(
+        { slug, isActive: true },
+        { $inc: { views: 1 } },
+        { new: true }
+    )
         .select(PRODUCT_SELECT_FIELDS)
         .lean();
 

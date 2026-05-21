@@ -4,13 +4,66 @@ import {
     getProductsSearchService,
     getProductDetailBySlug,
 } from '../services/product.service';
+import Product from '../models/product.model';
+
+const PRODUCT_SELECT_FIELDS =
+    'name slug brand category image images price oldPrice discount stock soldCount rating views description shortDescription isPromotion isLatest isBestSeller';
+
+const mapProduct = (product) => ({
+    id: product._id,
+    name: product.name,
+    slug: product.slug,
+    brand: product.brand,
+    category: product.category,
+    image: product.image,
+    images: Array.isArray(product.images) && product.images.length ? product.images : [product.image].filter(Boolean),
+    price: product.price,
+    oldPrice: product.oldPrice,
+    discount: product.discount,
+    stock: product.stock,
+    sold: product.soldCount,
+    views: product.views || 0,
+    rating: product.rating,
+    description: product.description || product.shortDescription,
+    shortDescription: product.shortDescription,
+    isPromotion: product.isPromotion,
+    isLatest: product.isLatest,
+    isBestSeller: product.isBestSeller,
+});
 
 export const getHomeProducts = async (req, res) => {
     try {
-        const limit = Number(req.query.limit) || 8;
-        const safeLimit = Math.min(Math.max(limit, 1), 20);
+        const limit = Number(req.query.limit) || 10;
+        const safeLimit = Math.min(Math.max(limit, 1), 10);
 
-        const sections = await getHomeSections(safeLimit);
+        const sections = await getHomeSections({
+            limit: safeLimit,
+            promotionPage: Number(req.query.promotionPage) || 1,
+            latestPage: Number(req.query.latestPage) || 1,
+            bestsellerPage: Number(req.query.bestsellerPage) || 1,
+            mostViewedPage: Number(req.query.mostViewedPage) || 1,
+        });
+
+        const mostViewedPage = Number(req.query.mostViewedPage) || 1;
+        const mostViewedSkip = (Math.max(mostViewedPage, 1) - 1) * safeLimit;
+        const [mostViewedTotal, mostViewedProducts] = await Promise.all([
+            Product.countDocuments({ isActive: true }),
+            Product.find({ isActive: true })
+                .sort({ views: -1, soldCount: -1, rating: -1, createdAt: -1 })
+                .skip(mostViewedSkip)
+                .limit(safeLimit)
+                .select(PRODUCT_SELECT_FIELDS)
+                .lean(),
+        ]);
+
+        sections.mostViewed = {
+            items: mostViewedProducts.map(mapProduct),
+            total: mostViewedTotal,
+            page: Math.max(mostViewedPage, 1),
+            limit: safeLimit,
+            totalPages: Math.max(1, Math.ceil(mostViewedTotal / safeLimit)),
+            hasMore: mostViewedSkip + mostViewedProducts.length < mostViewedTotal,
+        };
 
         return res.status(200).json({
             errCode: 0,
