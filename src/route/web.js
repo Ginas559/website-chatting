@@ -23,6 +23,8 @@ import userManagementController from "../controllers/userManagement.controller.j
 import { createUserValidator, updateUserValidator, deleteUserValidator } from "../middleware/userManagement.middleware.js";
 import initProductRoutes from "./product.route.js";
 import initCartRoutes from "./cart.route.js";
+import initOrderRoutes from "./order.route.js";
+import initPaymentRoutes from "./payment.route.js";
 
 let router = express.Router();
 
@@ -50,6 +52,8 @@ let initWebRoutes = (app) => {
     router.get('/moderator/profile', authenticateToken, authorizeModerator, loginController.getModeratorProfile);
 
     initCartRoutes(app);
+    initOrderRoutes(app);
+    initPaymentRoutes(app);
 
     router.get('/admin/users', authenticateToken, authorizeRoles('R1', 'R3'), userManagementController.listUsers);
     router.post('/admin/users', authenticateToken, authorizeAdmin, createUserValidator, userManagementController.createUser);

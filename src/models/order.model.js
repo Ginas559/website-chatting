@@ -1,0 +1,140 @@
+import mongoose from 'mongoose';
+
+const orderItemSnapshotSchema = new mongoose.Schema(
+    {
+        name: { type: String, required: true, trim: true },
+        slug: { type: String, required: true, trim: true },
+        image: { type: String, required: true, trim: true },
+        price: { type: Number, required: true, min: 0 },
+        brand: { type: String, required: true, trim: true },
+        category: { type: String, required: true, trim: true },
+    },
+    { _id: false }
+);
+
+const orderItemSchema = new mongoose.Schema(
+    {
+        product: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Product',
+            required: true,
+        },
+        quantity: {
+            type: Number,
+            required: true,
+            min: 1,
+        },
+        unitPrice: {
+            type: Number,
+            required: true,
+            min: 0,
+        },
+        lineTotal: {
+            type: Number,
+            required: true,
+            min: 0,
+        },
+        snapshot: {
+            type: orderItemSnapshotSchema,
+            required: true,
+        },
+    },
+    { _id: false }
+);
+
+const shippingInfoSchema = new mongoose.Schema(
+    {
+        fullName: { type: String, required: true, trim: true },
+        phone: { type: String, required: true, trim: true },
+        address: { type: String, required: true, trim: true },
+        city: { type: String, default: '', trim: true },
+        note: { type: String, default: '', trim: true },
+    },
+    { _id: false }
+);
+
+const statusHistorySchema = new mongoose.Schema(
+    {
+        status: { type: String, required: true, trim: true },
+        note: { type: String, default: '', trim: true },
+        changedAt: { type: Date, default: Date.now },
+    },
+    { _id: false }
+);
+
+const paymentInfoSchema = new mongoose.Schema(
+    {
+        provider: { type: String, default: '', trim: true },
+        transactionNo: { type: String, default: '', trim: true },
+        bankCode: { type: String, default: '', trim: true },
+        cardType: { type: String, default: '', trim: true },
+        responseCode: { type: String, default: '', trim: true },
+        transactionStatus: { type: String, default: '', trim: true },
+        payDate: { type: String, default: '', trim: true },
+        lastVerifiedAt: { type: Date },
+    },
+    { _id: false }
+);
+
+const orderSchema = new mongoose.Schema(
+    {
+        orderCode: { type: String, required: true, unique: true, trim: true },
+        user: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+            index: true,
+        },
+        items: {
+            type: [orderItemSchema],
+            required: true,
+            validate: {
+                validator: (items) => Array.isArray(items) && items.length > 0,
+                message: 'Đơn hàng phải có ít nhất một sản phẩm',
+            },
+        },
+        shippingInfo: {
+            type: shippingInfoSchema,
+            required: true,
+        },
+        subtotal: { type: Number, required: true, min: 0 },
+        shippingFee: { type: Number, default: 0, min: 0 },
+        totalAmount: { type: Number, required: true, min: 0 },
+        paymentMethod: {
+            type: String,
+            enum: ['COD', 'VNPAY'],
+            default: 'COD',
+            required: true,
+        },
+        paymentStatus: {
+            type: String,
+            enum: ['UNPAID', 'PAID', 'FAILED', 'REFUND_REQUIRED', 'REFUNDED'],
+            default: 'UNPAID',
+            required: true,
+        },
+        paymentInfo: {
+            type: paymentInfoSchema,
+            default: () => ({}),
+        },
+        status: {
+            type: String,
+            enum: ['PENDING_PAYMENT', 'NEW', 'CONFIRMED', 'PREPARING', 'SHIPPING', 'DELIVERED', 'CANCELLED', 'CANCEL_REQUESTED'],
+            default: 'NEW',
+            required: true,
+        },
+        statusHistory: {
+            type: [statusHistorySchema],
+            default: () => [{ status: 'NEW', note: 'Đơn hàng mới được tạo', changedAt: new Date() }],
+        },
+    },
+    {
+        timestamps: true,
+    }
+);
+
+orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ status: 1, createdAt: -1 });
+
+const Order = mongoose.model('Order', orderSchema);
+
+export default Order;
