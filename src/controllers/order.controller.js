@@ -1,5 +1,5 @@
 import { cancelMyOrder, checkoutOrder, getMyOrderDetail, getMyOrders, OrderServiceError } from '../services/order.service.js';
-import { createVnpayPaymentFromCart, PaymentServiceError } from '../services/payment.service.js';
+import { createVnpayPaymentForExistingOrder, createVnpayPaymentFromCart, PaymentServiceError } from '../services/payment.service.js';
 
 const sendSuccessResponse = (res, { message, data, status = 200 }) => {
     return res.status(status).json({
@@ -136,6 +136,31 @@ export const cancelMyOrderController = async (req, res) => {
         return sendErrorResponse(res, {
             status: error instanceof OrderServiceError ? error.statusCode : 500,
             message: error instanceof OrderServiceError ? error.message : 'Lỗi server khi hủy đơn hàng',
+            error,
+        });
+    }
+};
+
+export const repayVnpayOrderController = async (req, res) => {
+    try {
+        const userId = getUserIdFromRequest(req);
+        const payment = await createVnpayPaymentForExistingOrder({
+            userId,
+            orderIdOrCode: req.params?.orderIdOrCode,
+            ipAddr: getClientIpFromRequest(req),
+            bankCode: req.body?.bankCode,
+        });
+
+        return sendSuccessResponse(res, {
+            message: 'Tạo lại link thanh toán VNPay thành công',
+            data: payment,
+        });
+    } catch (error) {
+        const knownError = error instanceof PaymentServiceError;
+
+        return sendErrorResponse(res, {
+            status: knownError ? error.statusCode : 500,
+            message: knownError ? error.message : 'Lỗi server khi tạo lại thanh toán VNPay',
             error,
         });
     }

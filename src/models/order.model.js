@@ -72,6 +72,8 @@ const paymentInfoSchema = new mongoose.Schema(
         transactionStatus: { type: String, default: '', trim: true },
         payDate: { type: String, default: '', trim: true },
         lastVerifiedAt: { type: Date },
+        returnVerifiedSuccess: { type: Boolean, default: false },
+        returnVerifiedAt: { type: Date },
     },
     { _id: false }
 );

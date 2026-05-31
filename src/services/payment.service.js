@@ -160,9 +160,23 @@ const confirmPaidOrder = async (order, verifyResult, session) => {
     await clearOrderedItemsFromCart(order.user, order.items, session);
 };
 
-export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr, bankCode }) => {
+const buildVnpayPaymentUrl = ({ order, ipAddr, bankCode }) => {
+    const vnpay = getVnpayClient();
     const returnUrl = getRequiredEnv('VNPAY_RETURN_URL');
-    const clientIp = normalizeText(ipAddr) || '127.0.0.1';
+
+    return vnpay.buildPaymentUrl({
+        vnp_Amount: order.totalAmount,
+        vnp_IpAddr: normalizeText(ipAddr) || '127.0.0.1',
+        vnp_ReturnUrl: returnUrl,
+        vnp_TxnRef: order.orderCode,
+        vnp_OrderInfo: `Thanh toan don hang ${order.orderCode}`,
+        vnp_OrderType: ProductCode.Other,
+        vnp_Locale: VnpLocale.VN,
+        vnp_BankCode: normalizeText(bankCode) || undefined,
+    });
+};
+
+export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr, bankCode }) => {
     const session = await mongoose.startSession();
 
     try {
@@ -199,17 +213,7 @@ export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr,
             createdOrder = order;
         });
 
-        const vnpay = getVnpayClient();
-        const paymentUrl = vnpay.buildPaymentUrl({
-            vnp_Amount: createdOrder.totalAmount,
-            vnp_IpAddr: clientIp,
-            vnp_ReturnUrl: returnUrl,
-            vnp_TxnRef: createdOrder.orderCode,
-            vnp_OrderInfo: `Thanh toan don hang ${createdOrder.orderCode}`,
-            vnp_OrderType: ProductCode.Other,
-            vnp_Locale: VnpLocale.VN,
-            vnp_BankCode: normalizeText(bankCode) || undefined,
-        });
+        const paymentUrl = buildVnpayPaymentUrl({ order: createdOrder, ipAddr, bankCode });
 
         return {
             order: mapOrder(createdOrder),
@@ -218,6 +222,48 @@ export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr,
     } finally {
         await session.endSession();
     }
+};
+
+export const createVnpayPaymentForExistingOrder = async ({ userId, orderIdOrCode, ipAddr, bankCode }) => {
+    const orderKey = normalizeText(orderIdOrCode);
+
+    if (!mongoose.isValidObjectId(userId)) {
+        throw createServiceError(400, 'Người dùng không hợp lệ', 'INVALID_OBJECT_ID');
+    }
+
+    if (!orderKey) {
+        throw createServiceError(400, 'Mã đơn hàng không hợp lệ', 'INVALID_ORDER_KEY');
+    }
+
+    const filter = { user: userId, paymentMethod: VNPAY_PROVIDER };
+
+    if (mongoose.isValidObjectId(orderKey)) {
+        filter._id = orderKey;
+    } else {
+        filter.orderCode = orderKey.toUpperCase();
+    }
+
+    const order = await Order.findOne(filter);
+
+    if (!order) {
+        throw createServiceError(404, 'Không tìm thấy đơn hàng VNPay', 'ORDER_NOT_FOUND');
+    }
+
+    if (order.paymentStatus !== 'UNPAID' || order.status !== 'PENDING_PAYMENT') {
+        throw createServiceError(400, 'Đơn hàng hiện tại không thể thanh toán lại', 'ORDER_CANNOT_REPAY', {
+            status: order.status,
+            paymentStatus: order.paymentStatus,
+        });
+    }
+
+    if (order.paymentInfo?.returnVerifiedSuccess) {
+        throw createServiceError(409, 'Giao dịch đã được VNPay ghi nhận, vui lòng chờ hệ thống xác nhận', 'PAYMENT_CONFIRMATION_PENDING');
+    }
+
+    return {
+        order: mapOrder(order),
+        paymentUrl: buildVnpayPaymentUrl({ order, ipAddr, bankCode }),
+    };
 };
 
 export const handleVnpayIpn = async (query = {}) => {
@@ -267,11 +313,11 @@ export const handleVnpayIpn = async (query = {}) => {
     }
 };
 
-export const verifyVnpayReturn = (query = {}) => {
+export const verifyVnpayReturn = async (query = {}) => {
     const vnpay = getVnpayClient();
     const verifyResult = vnpay.verifyReturnUrl(query);
 
-    return {
+    const result = {
         isVerified: verifyResult.isVerified,
         isSuccess: verifyResult.isSuccess,
         message: verifyResult.message,
@@ -283,6 +329,24 @@ export const verifyVnpayReturn = (query = {}) => {
         bankCode: normalizeText(verifyResult.vnp_BankCode),
         payDate: normalizeText(verifyResult.vnp_PayDate),
     };
+
+    if (result.isVerified && result.orderCode) {
+        const order = await Order.findOne({ orderCode: result.orderCode, paymentMethod: VNPAY_PROVIDER });
+
+        if (order && sameAmount(order.totalAmount, result.amount) && order.paymentStatus === 'UNPAID' && order.status === 'PENDING_PAYMENT') {
+            const currentPaymentInfo = order.paymentInfo?.toObject?.() || order.paymentInfo || {};
+            order.paymentInfo = {
+                ...currentPaymentInfo,
+                ...buildPaymentInfoFromVerifyResult(verifyResult),
+                returnVerifiedSuccess: result.isSuccess,
+                returnVerifiedAt: new Date(),
+            };
+
+            await order.save();
+        }
+    }
+
+    return result;
 };
 
 export { PaymentServiceError };
