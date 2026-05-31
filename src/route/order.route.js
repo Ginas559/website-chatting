@@ -8,6 +8,7 @@ const initOrderRoutes = (app) => {
     router.get('/api/orders/my', authenticateToken, authorizeUser, orderController.getMyOrdersController);
     router.get('/api/orders/my/:orderIdOrCode', authenticateToken, authorizeUser, orderController.getMyOrderDetailController);
     router.patch('/api/orders/my/:orderIdOrCode/cancel', authenticateToken, authorizeUser, orderController.cancelMyOrderController);
+    router.post('/api/orders/my/:orderIdOrCode/pay', authenticateToken, authorizeUser, orderController.repayVnpayOrderController);
     router.post('/api/orders/checkout', authenticateToken, authorizeUser, orderController.checkoutOrderController);
 
     return app.use('/', router);

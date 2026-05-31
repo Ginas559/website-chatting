@@ -33,7 +33,7 @@ export const vnpayIpnController = async (req, res) => {
 
 export const vnpayReturnController = async (req, res) => {
     try {
-        const result = verifyVnpayReturn(req.query || {});
+        const result = await verifyVnpayReturn(req.query || {});
 
         return sendSuccessResponse(res, {
             message: result.isSuccess ? 'Thanh toán VNPay thành công' : 'Thanh toán VNPay không thành công',
