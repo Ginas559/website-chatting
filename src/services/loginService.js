@@ -65,7 +65,9 @@ let handleUserLogin = async (email, password) => {
             address: user.address,
             phoneNumber: user.phoneNumber,
             gender: user.gender,
-            image: user.image
+            image: user.image,
+            rewardPoints: user.rewardPoints || 0,
+            rewardCoupons: Array.isArray(user.rewardCoupons) ? user.rewardCoupons : []
         };
 
         return {
