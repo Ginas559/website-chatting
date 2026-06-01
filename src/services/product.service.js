@@ -1,4 +1,8 @@
 import Product from '../models/product.model';
+import User from '../models/user.js';
+import Order from '../models/order.model.js';
+import Review from '../models/review.model.js';
+import mongoose from 'mongoose';
 
 const PRODUCT_SELECT_FIELDS =
     'name slug brand category image images price oldPrice discount stock soldCount rating views description shortDescription isPromotion isLatest isBestSeller';
@@ -9,9 +13,10 @@ const DEFAULT_HOME_SECTION_PAGE_SIZE = 10;
 const MAX_SEARCH_PAGE_SIZE = 12;
 const MAX_HOME_SECTION_PAGE_SIZE = 10;
 const RELATED_PRODUCTS_LIMIT = 8;
+const RECENTLY_VIEWED_LIMIT = 20;
 
-const mapProduct = (product) => ({
-    id: product._id,
+const mapProduct = (product, stats = {}) => ({
+    id: product?._id ? String(product._id) : (product?.id ? String(product.id) : ''),
     name: product.name,
     slug: product.slug,
     brand: product.brand,
@@ -30,7 +35,57 @@ const mapProduct = (product) => ({
     isPromotion: product.isPromotion,
     isLatest: product.isLatest,
     isBestSeller: product.isBestSeller,
+    buyerCount: Number(stats.buyerCount || product.buyerCount || 0),
+    commentCount: Number(stats.commentCount || product.commentCount || 0),
 });
+
+const objectIdFrom = (id) => {
+    if (!mongoose.Types.ObjectId.isValid(id)) return null;
+    return new mongoose.Types.ObjectId(id);
+};
+
+const getProductStatsMap = async (productIds = []) => {
+    const ids = productIds.map((id) => String(id)).filter(Boolean);
+    if (!ids.length) return {};
+    const objectIds = ids.map((id) => new mongoose.Types.ObjectId(id));
+
+    const [buyerStats, commentStats] = await Promise.all([
+        Order.aggregate([
+            { $match: { status: 'DELIVERED', 'items.product': { $in: objectIds } } },
+            { $unwind: '$items' },
+            { $match: { 'items.product': { $in: objectIds } } },
+            { $group: { _id: '$items.product', users: { $addToSet: '$user' } } },
+            { $project: { _id: 1, buyerCount: { $size: '$users' } } },
+        ]),
+        Review.aggregate([
+            { $match: { product: { $in: objectIds } } },
+            { $group: { _id: '$product', commentCount: { $sum: 1 } } },
+        ]),
+    ]);
+
+    const statsMap = {};
+    ids.forEach((id) => {
+        statsMap[id] = { buyerCount: 0, commentCount: 0 };
+    });
+
+    buyerStats.forEach((item) => {
+        const key = String(item._id);
+        statsMap[key] = {
+            ...(statsMap[key] || {}),
+            buyerCount: Number(item.buyerCount || 0),
+        };
+    });
+
+    commentStats.forEach((item) => {
+        const key = String(item._id);
+        statsMap[key] = {
+            ...(statsMap[key] || {}),
+            commentCount: Number(item.commentCount || 0),
+        };
+    });
+
+    return statsMap;
+};
 
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -82,7 +137,8 @@ const getPaginatedProducts = async ({ filter, sort, page, limit, defaultLimit, m
             .lean(),
     ]);
 
-    const items = products.map(mapProduct);
+    const statsMap = await getProductStatsMap(products.map((item) => item._id));
+    const items = products.map((product) => mapProduct(product, statsMap[String(product._id)]));
     const pagination = buildPagination(paginationInput.page, paginationInput.limit, total);
 
     return {
@@ -304,8 +360,151 @@ export const getProductDetailBySlug = async (slug) => {
         .select(PRODUCT_SELECT_FIELDS)
         .lean();
 
+    const statsMap = await getProductStatsMap([product._id, ...relatedProducts.map((item) => item._id)]);
+
     return {
-        product: mapProduct(product),
-        related: relatedProducts.map(mapProduct),
+        product: mapProduct(product, statsMap[String(product._id)]),
+        related: relatedProducts.map((item) => mapProduct(item, statsMap[String(item._id)])),
+    };
+};
+
+export const toggleFavoriteProductService = async ({ userId, productId }) => {
+    const userObjectId = objectIdFrom(userId);
+    const productObjectId = objectIdFrom(productId);
+
+    if (!userObjectId || !productObjectId) {
+        return { invalid: true };
+    }
+
+    const [user, product] = await Promise.all([
+        User.findById(userObjectId).select('favoriteProducts'),
+        Product.findOne({ _id: productObjectId, isActive: true }).select('_id'),
+    ]);
+
+    if (!user || !product) {
+        return { invalid: true };
+    }
+
+    const currentFavorites = Array.isArray(user.favoriteProducts)
+        ? user.favoriteProducts.map((id) => String(id))
+        : [];
+    const nextIsFavorite = !currentFavorites.includes(String(productObjectId));
+
+    await User.updateOne(
+        { _id: userObjectId },
+        nextIsFavorite
+            ? { $addToSet: { favoriteProducts: productObjectId } }
+            : { $pull: { favoriteProducts: productObjectId } }
+    );
+
+    const updatedUser = await User.findById(userObjectId).select('favoriteProducts').lean();
+    const favoriteProductIds = Array.isArray(updatedUser?.favoriteProducts)
+        ? updatedUser.favoriteProducts.map((id) => String(id))
+        : [];
+
+    let favoriteProducts = [];
+    if (favoriteProductIds.length) {
+        const products = await Product.find({
+            _id: { $in: favoriteProductIds.map((id) => new mongoose.Types.ObjectId(id)) },
+            isActive: true,
+        })
+            .select(PRODUCT_SELECT_FIELDS)
+            .lean();
+
+        const productMap = new Map(products.map((item) => [String(item._id), item]));
+        const orderedProducts = favoriteProductIds
+            .map((id) => productMap.get(id))
+            .filter(Boolean);
+        const statsMap = await getProductStatsMap(orderedProducts.map((item) => item._id));
+        favoriteProducts = orderedProducts.map((item) => mapProduct(item, statsMap[String(item._id)]));
+    }
+
+    return {
+        invalid: false,
+        isFavorite: nextIsFavorite,
+        favoriteProductIds,
+        favoriteProducts,
+    };
+};
+
+export const getFavoriteProductsService = async ({ userId }) => {
+    const userObjectId = objectIdFrom(userId);
+    if (!userObjectId) return null;
+
+    const user = await User.findById(userObjectId).select('favoriteProducts').lean();
+    if (!user) return null;
+
+    const favoriteProductIds = Array.isArray(user.favoriteProducts)
+        ? user.favoriteProducts.map((id) => String(id))
+        : [];
+
+    if (!favoriteProductIds.length) {
+        return { favoriteProductIds: [], items: [] };
+    }
+
+    const products = await Product.find({
+        _id: { $in: favoriteProductIds.map((id) => new mongoose.Types.ObjectId(id)) },
+        isActive: true,
+    })
+        .select(PRODUCT_SELECT_FIELDS)
+        .lean();
+
+    const productMap = new Map(products.map((item) => [String(item._id), item]));
+    const orderedProducts = favoriteProductIds.map((id) => productMap.get(id)).filter(Boolean);
+    const statsMap = await getProductStatsMap(orderedProducts.map((item) => item._id));
+    const items = orderedProducts.map((item) => mapProduct(item, statsMap[String(item._id)]));
+
+    return {
+        favoriteProductIds,
+        items,
+    };
+};
+
+export const addRecentlyViewedProductService = async ({ userId, slug }) => {
+    const userObjectId = objectIdFrom(userId);
+    if (!userObjectId || !slug) return null;
+
+    const product = await Product.findOne({ slug, isActive: true }).select('_id').lean();
+    if (!product?._id) return null;
+
+    const productId = String(product._id);
+    const user = await User.findById(userObjectId).select('recentlyViewedProducts').lean();
+    if (!user) return null;
+
+    const viewed = Array.isArray(user.recentlyViewedProducts)
+        ? user.recentlyViewedProducts.map((id) => String(id)).filter((id) => id !== productId)
+        : [];
+    const nextViewed = [productId, ...viewed].slice(0, RECENTLY_VIEWED_LIMIT);
+
+    await User.updateOne({ _id: userObjectId }, { recentlyViewedProducts: nextViewed });
+
+    return { productId };
+};
+
+export const getRecentlyViewedProductsService = async ({ userId }) => {
+    const userObjectId = objectIdFrom(userId);
+    if (!userObjectId) return null;
+
+    const user = await User.findById(userObjectId).select('recentlyViewedProducts').lean();
+    if (!user) return null;
+
+    const ids = Array.isArray(user.recentlyViewedProducts) ? user.recentlyViewedProducts.map((id) => String(id)) : [];
+    if (!ids.length) {
+        return { items: [] };
+    }
+
+    const products = await Product.find({
+        _id: { $in: ids.map((id) => new mongoose.Types.ObjectId(id)) },
+        isActive: true,
+    })
+        .select(PRODUCT_SELECT_FIELDS)
+        .lean();
+
+    const mapById = new Map(products.map((item) => [String(item._id), item]));
+    const ordered = ids.map((id) => mapById.get(id)).filter(Boolean);
+    const statsMap = await getProductStatsMap(ordered.map((item) => item._id));
+
+    return {
+        items: ordered.map((item) => mapProduct(item, statsMap[String(item._id)])),
     };
 };
