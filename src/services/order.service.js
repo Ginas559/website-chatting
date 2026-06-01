@@ -63,11 +63,42 @@ const getOrderOwnershipFilter = (userId, orderIdOrCode) => {
     return filter;
 };
 
+const getOrderFilter = (orderIdOrCode) => {
+    if (mongoose.isValidObjectId(orderIdOrCode)) {
+        return { _id: orderIdOrCode };
+    }
+
+    return { orderCode: normalizeText(orderIdOrCode).toUpperCase() };
+};
+
 const MINUTES_TO_CANCEL_NEW_ORDER = 30;
 const CANCELLABLE_NEW_STATUSES = ['NEW'];
 const REQUEST_CANCEL_STATUSES = ['PREPARING'];
 const FINAL_STATUSES = ['CANCELLED', 'DELIVERED'];
 const AUTO_CONFIRM_AFTER_MINUTES = 30;
+const ADMIN_NEXT_STATUSES = {
+    NEW: 'CONFIRMED',
+    CONFIRMED: 'PREPARING',
+    PREPARING: 'SHIPPING',
+    SHIPPING: 'DELIVERED',
+};
+const ADMIN_STATUS_NOTES = {
+    CONFIRMED: 'Shop đã xác nhận đơn hàng của bạn',
+    PREPARING: 'Shop đang chuẩn bị hàng cho đơn hàng của bạn',
+    SHIPPING: 'Đơn hàng đã được bàn giao cho đơn vị vận chuyển',
+    DELIVERED: 'Đơn hàng đã được giao thành công',
+};
+const USER_ACTIVITY_STATUSES = ['CANCELLED', 'CANCEL_REQUESTED'];
+const USER_HISTORY_STATUS_PRIORITY = {
+    CANCEL_REQUESTED: 0,
+    NEW: 1,
+    CANCELLED: 2,
+    CONFIRMED: 3,
+    PREPARING: 4,
+    PENDING_PAYMENT: 5,
+    SHIPPING: 6,
+    DELIVERED: 7,
+};
 
 const getMinutesSince = (date) => {
     const createdAt = new Date(date).getTime();
@@ -140,6 +171,15 @@ const getCancelDecision = (order) => {
     }
 
     if (REQUEST_CANCEL_STATUSES.includes(order.status)) {
+        if (hasRejectedCancelRequest(order)) {
+            return {
+                action: 'BLOCK',
+                message: 'Yêu cầu hủy đơn đã bị shop từ chối, không thể gửi lại yêu cầu hủy',
+                code: 'CANCEL_REQUEST_REJECTED',
+                statusCode: 400,
+            };
+        }
+
         return { action: 'REQUEST_CANCEL' };
     }
 
@@ -158,6 +198,45 @@ const getCancelDecision = (order) => {
         code: 'ORDER_CANNOT_BE_CANCELLED',
         statusCode: 400,
     };
+};
+
+const hasRejectedCancelRequest = (order) => {
+    const history = Array.isArray(order?.statusHistory) ? order.statusHistory : [];
+    const lastCancelRequestIndex = history.map((entry) => entry?.status).lastIndexOf('CANCEL_REQUESTED');
+
+    if (lastCancelRequestIndex < 0) {
+        return false;
+    }
+
+    return history.slice(lastCancelRequestIndex + 1).some((entry) => entry?.status === 'PREPARING');
+};
+
+const validateOrderStatus = (status) => {
+    const normalizedStatus = normalizeText(status).toUpperCase();
+
+    if (!normalizedStatus) {
+        return '';
+    }
+
+    const validStatuses = Order.schema.path('status').enumValues;
+    if (!validStatuses.includes(normalizedStatus)) {
+        throw createServiceError(400, 'Trạng thái đơn hàng không hợp lệ', 'INVALID_ORDER_STATUS', {
+            status: normalizedStatus,
+            validStatuses,
+        });
+    }
+
+    return normalizedStatus;
+};
+
+const validateAdminNote = (note) => {
+    const normalizedNote = normalizeText(note);
+
+    if (normalizedNote.length > 300) {
+        throw createServiceError(400, 'Ghi chú không được vượt quá 300 ký tự', 'INVALID_ORDER_NOTE');
+    }
+
+    return normalizedNote;
 };
 
 export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod }) => {
@@ -212,7 +291,7 @@ export const getMyOrders = async ({ userId, page, limit, status }) => {
     }
 
     const paging = normalizePagination({ page, limit });
-    const filter = { user: userId };
+    const filter = { user: new mongoose.Types.ObjectId(userId) };
     const normalizedStatus = normalizeText(status).toUpperCase();
     await autoConfirmExpiredNewOrders(userId);
 
@@ -228,10 +307,65 @@ export const getMyOrders = async ({ userId, page, limit, status }) => {
         filter.status = normalizedStatus;
     }
 
-    const [orders, total] = await Promise.all([
-        Order.find(filter).sort({ createdAt: -1 }).skip(paging.skip).limit(paging.limit).lean(),
+    const [orders, total, summaryResult] = await Promise.all([
+        Order.aggregate([
+            { $match: filter },
+            {
+                $addFields: {
+                    userHistoryPriority: {
+                        $switch: {
+                            branches: Object.entries(USER_HISTORY_STATUS_PRIORITY).map(([status, priority]) => ({
+                                case: { $eq: ['$status', status] },
+                                then: priority,
+                            })),
+                            default: 99,
+                        },
+                    },
+                    latestUserActivityAt: {
+                        $max: {
+                            $concatArrays: [
+                                ['$createdAt'],
+                                {
+                                    $map: {
+                                        input: {
+                                            $filter: {
+                                                input: '$statusHistory',
+                                                as: 'history',
+                                                cond: { $in: ['$$history.status', USER_ACTIVITY_STATUSES] },
+                                            },
+                                        },
+                                        as: 'history',
+                                        in: '$$history.changedAt',
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+            { $sort: { userHistoryPriority: 1, latestUserActivityAt: -1, createdAt: -1 } },
+            { $skip: paging.skip },
+            { $limit: paging.limit },
+        ]),
         Order.countDocuments(filter),
+        Order.aggregate([
+            {
+                $match: {
+                    user: new mongoose.Types.ObjectId(userId),
+                    status: 'DELIVERED',
+                    paymentStatus: 'PAID',
+                },
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalDeliveredOrders: { $sum: 1 },
+                    totalDeliveredAmount: { $sum: '$totalAmount' },
+                },
+            },
+        ]),
     ]);
+    const summary = summaryResult[0] || { totalDeliveredOrders: 0, totalDeliveredAmount: 0 };
 
     return {
         items: orders.map(mapOrder),
@@ -240,6 +374,10 @@ export const getMyOrders = async ({ userId, page, limit, status }) => {
             limit: paging.limit,
             total,
             totalPages: Math.ceil(total / paging.limit),
+        },
+        summary: {
+            totalPurchasedOrders: summary.totalDeliveredOrders,
+            totalPurchasedAmount: summary.totalDeliveredAmount,
         },
     };
 };
@@ -304,6 +442,164 @@ export const cancelMyOrder = async ({ userId, orderIdOrCode, reason }) => {
         order.statusHistory.push({
             status: 'CANCEL_REQUESTED',
             note: cancelReason || 'Người dùng gửi yêu cầu hủy đơn cho shop',
+            changedAt: new Date(),
+        });
+    }
+
+    await order.save();
+
+    return mapOrder(order);
+};
+
+export const getAdminOrders = async ({ page, limit, status }) => {
+    const paging = normalizePagination({ page, limit });
+    const filter = {};
+    const normalizedStatus = validateOrderStatus(status);
+
+    await autoConfirmExpiredNewOrders();
+
+    if (normalizedStatus) {
+        filter.status = normalizedStatus;
+    }
+
+    const [orders, total] = await Promise.all([
+        Order.find(filter)
+            .populate('user', 'email firstName lastName phoneNumber')
+            .sort({ createdAt: -1 })
+            .skip(paging.skip)
+            .limit(paging.limit)
+            .lean(),
+        Order.countDocuments(filter),
+    ]);
+
+    return {
+        items: orders.map(mapOrder),
+        pagination: {
+            page: paging.page,
+            limit: paging.limit,
+            total,
+            totalPages: Math.ceil(total / paging.limit),
+        },
+    };
+};
+
+export const getAdminOrderDetail = async ({ orderIdOrCode }) => {
+    const orderKey = normalizeText(orderIdOrCode);
+    if (!orderKey) {
+        throw createServiceError(400, 'Mã đơn hàng không hợp lệ', 'INVALID_ORDER_KEY');
+    }
+
+    await autoConfirmExpiredNewOrders();
+    const order = await Order.findOne(getOrderFilter(orderKey))
+        .populate('user', 'email firstName lastName phoneNumber')
+        .lean();
+
+    if (!order) {
+        throw createServiceError(404, 'Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND');
+    }
+
+    return mapOrder(order);
+};
+
+export const updateAdminOrderStatus = async ({ orderIdOrCode, status, note }) => {
+    const orderKey = normalizeText(orderIdOrCode);
+    if (!orderKey) {
+        throw createServiceError(400, 'Mã đơn hàng không hợp lệ', 'INVALID_ORDER_KEY');
+    }
+
+    const nextStatus = validateOrderStatus(status);
+    if (!nextStatus) {
+        throw createServiceError(400, 'Trạng thái mới không được để trống', 'MISSING_ORDER_STATUS');
+    }
+
+    const adminNote = validateAdminNote(note);
+
+    await autoConfirmExpiredNewOrders();
+    const order = await Order.findOne(getOrderFilter(orderKey));
+
+    if (!order) {
+        throw createServiceError(404, 'Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND');
+    }
+
+    if (FINAL_STATUSES.includes(order.status)) {
+        throw createServiceError(400, 'Đơn hàng đã hoàn tất hoặc đã hủy, không thể cập nhật trạng thái', 'ORDER_ALREADY_FINALIZED');
+    }
+
+    if (order.status === 'CANCEL_REQUESTED') {
+        throw createServiceError(400, 'Đơn hàng đang chờ xử lý yêu cầu hủy', 'CANCEL_REQUEST_PENDING');
+    }
+
+    const expectedStatus = ADMIN_NEXT_STATUSES[order.status];
+    if (nextStatus !== expectedStatus) {
+        throw createServiceError(400, 'Chỉ được chuyển đơn hàng sang bước kế tiếp', 'INVALID_ORDER_TRANSITION', {
+            currentStatus: order.status,
+            allowedNextStatus: expectedStatus || null,
+            requestedStatus: nextStatus,
+        });
+    }
+
+    order.status = nextStatus;
+    if (order.paymentMethod === 'COD' && nextStatus === 'DELIVERED') {
+        order.paymentStatus = 'PAID';
+        order.paymentInfo = {
+            ...(order.paymentInfo?.toObject?.() || order.paymentInfo || {}),
+            provider: 'COD',
+            lastVerifiedAt: new Date(),
+        };
+    }
+
+    order.statusHistory.push({
+        status: nextStatus,
+        note: adminNote || (order.paymentMethod === 'COD' && nextStatus === 'DELIVERED'
+            ? 'Đã giao hàng và thu tiền COD thành công'
+            : ADMIN_STATUS_NOTES[nextStatus] || 'Shop cập nhật trạng thái đơn hàng'),
+        changedAt: new Date(),
+    });
+
+    await order.save();
+
+    return mapOrder(order);
+};
+
+export const resolveAdminCancelRequest = async ({ orderIdOrCode, action, note }) => {
+    const orderKey = normalizeText(orderIdOrCode);
+    if (!orderKey) {
+        throw createServiceError(400, 'Mã đơn hàng không hợp lệ', 'INVALID_ORDER_KEY');
+    }
+
+    const normalizedAction = normalizeText(action).toUpperCase();
+    if (!['APPROVE', 'REJECT'].includes(normalizedAction)) {
+        throw createServiceError(400, 'Hành động xử lý yêu cầu hủy không hợp lệ', 'INVALID_CANCEL_ACTION', {
+            validActions: ['APPROVE', 'REJECT'],
+        });
+    }
+
+    const adminNote = validateAdminNote(note);
+    const order = await Order.findOne(getOrderFilter(orderKey));
+
+    if (!order) {
+        throw createServiceError(404, 'Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND');
+    }
+
+    if (order.status !== 'CANCEL_REQUESTED') {
+        throw createServiceError(400, 'Đơn hàng không có yêu cầu hủy đang chờ xử lý', 'ORDER_NOT_CANCEL_REQUESTED');
+    }
+
+    if (normalizedAction === 'APPROVE') {
+        order.status = 'CANCELLED';
+        if (order.paymentStatus === 'PAID') {
+            order.paymentStatus = 'REFUND_REQUIRED';
+        }
+        order.statusHistory.push({
+            status: 'CANCELLED',
+            note: adminNote || 'Admin chấp nhận yêu cầu hủy đơn',
+            changedAt: new Date(),
+        });
+    } else {
+        order.status = 'PREPARING';
+        order.statusHistory.push({
+            status: 'PREPARING',
+            note: adminNote || 'Admin từ chối yêu cầu hủy đơn, tiếp tục chuẩn bị hàng',
             changedAt: new Date(),
         });
     }
