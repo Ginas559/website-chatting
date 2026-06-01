@@ -40,6 +40,8 @@ const userSchema = new mongoose.Schema({
     isActive: { type: Boolean, default: false },
     rewardPoints: { type: Number, default: 0, min: 0 },
     rewardCoupons: { type: [rewardCouponSchema], default: [] },
+    favoriteProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
+    recentlyViewedProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
 }, {
     timestamps: true 
 });

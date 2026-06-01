@@ -5,6 +5,10 @@ import {
     getProductDetailBySlug,
     getBestSellerProducts,
     getMostViewedProducts,
+    toggleFavoriteProductService,
+    getFavoriteProductsService,
+    addRecentlyViewedProductService,
+    getRecentlyViewedProductsService,
 } from '../services/product.service';
 
 const sendSuccessResponse = (res, { message, data, pagination, status = 200 }) => {
@@ -162,6 +166,117 @@ export const searchProducts = async (req, res) => {
             status: 500,
             message: 'Lỗi server khi tìm kiếm sản phẩm',
             logLabel: 'Product Search Controller Error:',
+            error,
+        });
+    }
+};
+
+export const getFavoriteProducts = async (req, res) => {
+    try {
+        const result = await getFavoriteProductsService({ userId: req.user?.id });
+
+        if (!result) {
+            return res.status(404).json({
+                success: false,
+                errCode: 1,
+                errMessage: 'Không tìm thấy dữ liệu yêu thích',
+            });
+        }
+
+        return sendSuccessResponse(res, {
+            message: 'Lấy danh sách yêu thích thành công',
+            data: result,
+        });
+    } catch (error) {
+        return sendErrorResponse(res, {
+            status: 500,
+            message: 'Lỗi server khi lấy danh sách yêu thích',
+            logLabel: 'Get Favorite Products Controller Error:',
+            error,
+        });
+    }
+};
+
+export const toggleFavoriteProduct = async (req, res) => {
+    try {
+        const userId = req.user?.id || req.user?._id;
+        const result = await toggleFavoriteProductService({
+            userId: userId ? String(userId) : '',
+            productId: req.params?.productId,
+        });
+
+        if (!result || result.invalid) {
+            return res.status(400).json({
+                success: false,
+                errCode: -1,
+                errMessage: 'Sản phẩm không hợp lệ hoặc không tồn tại',
+            });
+        }
+
+        return sendSuccessResponse(res, {
+            message: result.isFavorite ? 'Đã thêm vào yêu thích' : 'Đã bỏ khỏi yêu thích',
+            data: result,
+        });
+    } catch (error) {
+        return sendErrorResponse(res, {
+            status: 500,
+            message: 'Lỗi server khi cập nhật yêu thích',
+            logLabel: 'Toggle Favorite Product Controller Error:',
+            error,
+        });
+    }
+};
+
+export const addRecentlyViewedProduct = async (req, res) => {
+    try {
+        const result = await addRecentlyViewedProductService({
+            userId: req.user?.id,
+            slug: req.params?.slug,
+        });
+
+        if (!result) {
+            return res.status(400).json({
+                success: false,
+                errCode: -1,
+                errMessage: 'Không thể lưu sản phẩm đã xem',
+            });
+        }
+
+        return sendSuccessResponse(res, {
+            message: 'Đã lưu sản phẩm đã xem',
+            data: result,
+        });
+    } catch (error) {
+        return sendErrorResponse(res, {
+            status: 500,
+            message: 'Lỗi server khi lưu sản phẩm đã xem',
+            logLabel: 'Add Recently Viewed Product Controller Error:',
+            error,
+        });
+    }
+};
+
+export const getRecentlyViewedProducts = async (req, res) => {
+    try {
+        const result = await getRecentlyViewedProductsService({ userId: req.user?.id });
+
+        if (!result) {
+            return res.status(404).json({
+                success: false,
+                errCode: 1,
+                errMessage: 'Không tìm thấy dữ liệu sản phẩm đã xem',
+            });
+        }
+
+        return sendSuccessResponse(res, {
+            message: 'Lấy danh sách sản phẩm đã xem thành công',
+            data: result,
+        });
+    } catch (error) {
+        return sendErrorResponse(res, {
+            status: 500,
+            message: 'Lỗi server khi lấy sản phẩm đã xem',
+            logLabel: 'Get Recently Viewed Products Controller Error:',
             error,
         });
     }

@@ -15,7 +15,7 @@ export const createTempToken = (payload) => {
  */
 export const createAccessToken = (user) => { 
     return jwt.sign(
-        { id: user._id, roleId: user.roleId },
+        { id: String(user._id), roleId: user.roleId },
         process.env.JWT_SECRET,
         { expiresIn: '15m' }
     );
@@ -28,7 +28,7 @@ export const createAccessToken = (user) => {
  */
 export const createRefreshToken = (user) => {
     return jwt.sign(
-        { id: user._id, roleId: user.roleId },
+        { id: String(user._id), roleId: user.roleId },
         process.env.JWT_REFRESH_SECRET,
         { expiresIn: '7d' }
     );

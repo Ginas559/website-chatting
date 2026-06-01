@@ -3,6 +3,28 @@ import User from '../models/user';
 import RefreshToken from '../models/refreshToken.model';
 import { createAccessToken, createRefreshToken, verifyRefreshToken } from '../utils/jwt';
 
+const mapAuthUser = (user) => {
+    const favoriteIds = Array.isArray(user?.favoriteProducts)
+        ? user.favoriteProducts.map((id) => String(id))
+        : [];
+
+    return {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        roleId: user.roleId,
+        address: user.address,
+        phoneNumber: user.phoneNumber,
+        gender: user.gender,
+        image: user.image,
+        rewardPoints: user.rewardPoints || 0,
+        rewardCoupons: Array.isArray(user.rewardCoupons) ? user.rewardCoupons : [],
+        favoriteProducts: favoriteIds,
+        favoriteProductIds: favoriteIds,
+    };
+};
+
 /**
  * Service Layer - Xử lý logic nghiệp vụ cho Login
  * Kiến trúc 3 tầng: Controller -> Service -> Model
@@ -56,19 +78,7 @@ let handleUserLogin = async (email, password) => {
         });
 
         // Trả về thông tin user (không bao gồm password)
-        let userInfo = {
-            id: user._id,
-            email: user.email,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            roleId: user.roleId,
-            address: user.address,
-            phoneNumber: user.phoneNumber,
-            gender: user.gender,
-            image: user.image,
-            rewardPoints: user.rewardPoints || 0,
-            rewardCoupons: Array.isArray(user.rewardCoupons) ? user.rewardCoupons : []
-        };
+        let userInfo = mapAuthUser(user);
 
         return {
             errCode: 0,
@@ -191,7 +201,7 @@ let getUserProfile = async (userId) => {
         return {
             errCode: 0,
             errMessage: 'OK',
-            user: user
+            user: mapAuthUser(user),
         };
     } catch (error) {
         console.error('Get Profile Service Error:', error);
