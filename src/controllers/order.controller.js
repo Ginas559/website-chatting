@@ -1,4 +1,14 @@
-import { cancelMyOrder, checkoutOrder, getMyOrderDetail, getMyOrders, OrderServiceError } from '../services/order.service.js';
+import {
+    cancelMyOrder,
+    checkoutOrder,
+    getAdminOrderDetail,
+    getAdminOrders,
+    getMyOrderDetail,
+    getMyOrders,
+    OrderServiceError,
+    resolveAdminCancelRequest,
+    updateAdminOrderStatus,
+} from '../services/order.service.js';
 import { createVnpayPaymentForExistingOrder, createVnpayPaymentFromCart, PaymentServiceError } from '../services/payment.service.js';
 
 const sendSuccessResponse = (res, { message, data, status = 200 }) => {
@@ -161,6 +171,88 @@ export const repayVnpayOrderController = async (req, res) => {
         return sendErrorResponse(res, {
             status: knownError ? error.statusCode : 500,
             message: knownError ? error.message : 'Lỗi server khi tạo lại thanh toán VNPay',
+            error,
+        });
+    }
+};
+
+export const getAdminOrdersController = async (req, res) => {
+    try {
+        const result = await getAdminOrders({
+            page: req.query?.page,
+            limit: req.query?.limit,
+            status: req.query?.status,
+        });
+
+        return sendSuccessResponse(res, {
+            message: 'Lấy danh sách đơn hàng thành công',
+            data: result,
+        });
+    } catch (error) {
+        return sendErrorResponse(res, {
+            status: error instanceof OrderServiceError ? error.statusCode : 500,
+            message: error instanceof OrderServiceError ? error.message : 'Lỗi server khi lấy danh sách đơn hàng',
+            error,
+        });
+    }
+};
+
+export const getAdminOrderDetailController = async (req, res) => {
+    try {
+        const order = await getAdminOrderDetail({
+            orderIdOrCode: req.params?.orderIdOrCode,
+        });
+
+        return sendSuccessResponse(res, {
+            message: 'Lấy chi tiết đơn hàng thành công',
+            data: order,
+        });
+    } catch (error) {
+        return sendErrorResponse(res, {
+            status: error instanceof OrderServiceError ? error.statusCode : 500,
+            message: error instanceof OrderServiceError ? error.message : 'Lỗi server khi lấy chi tiết đơn hàng',
+            error,
+        });
+    }
+};
+
+export const updateAdminOrderStatusController = async (req, res) => {
+    try {
+        const order = await updateAdminOrderStatus({
+            orderIdOrCode: req.params?.orderIdOrCode,
+            status: req.body?.status,
+            note: req.body?.note,
+        });
+
+        return sendSuccessResponse(res, {
+            message: 'Cập nhật trạng thái đơn hàng thành công',
+            data: order,
+        });
+    } catch (error) {
+        return sendErrorResponse(res, {
+            status: error instanceof OrderServiceError ? error.statusCode : 500,
+            message: error instanceof OrderServiceError ? error.message : 'Lỗi server khi cập nhật trạng thái đơn hàng',
+            error,
+        });
+    }
+};
+
+export const resolveAdminCancelRequestController = async (req, res) => {
+    try {
+        const order = await resolveAdminCancelRequest({
+            orderIdOrCode: req.params?.orderIdOrCode,
+            action: req.body?.action,
+            note: req.body?.note,
+        });
+
+        return sendSuccessResponse(res, {
+            message: order.status === 'CANCELLED' ? 'Đã chấp nhận yêu cầu hủy đơn' : 'Đã từ chối yêu cầu hủy đơn',
+            data: order,
+        });
+    } catch (error) {
+        return sendErrorResponse(res, {
+            status: error instanceof OrderServiceError ? error.statusCode : 500,
+            message: error instanceof OrderServiceError ? error.message : 'Lỗi server khi xử lý yêu cầu hủy đơn',
             error,
         });
     }
