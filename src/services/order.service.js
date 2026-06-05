@@ -1,9 +1,15 @@
+import crypto from 'crypto';
 import mongoose from 'mongoose';
 import Order from '../models/order.model.js';
 import { applyStockForOrderItems, buildOrderDraftFromCart, clearCart, mapOrder, normalizeText } from './checkout.helper.js';
 
 const DEFAULT_PAYMENT_METHOD = 'COD';
 const SUPPORTED_PAYMENT_METHODS = ['COD'];
+const DELIVERY_QR_PREFIX = 'SZD1.';
+const DELIVERY_QR_TTL_DAYS = 30;
+const DELIVERY_QR_TOKEN_PATTERN = /^[a-f0-9]{64}$/i;
+const DELIVERY_QR_CREATABLE_STATUSES = ['SHIPPING', 'DELIVERED'];
+const DELIVERY_QR_CIPHER = 'aes-256-gcm';
 
 class OrderServiceError extends Error {
     constructor(statusCode, message, code = 'ORDER_ERROR', details = null) {
@@ -61,6 +67,128 @@ const getOrderOwnershipFilter = (userId, orderIdOrCode) => {
 
     filter.orderCode = normalizeText(orderIdOrCode).toUpperCase();
     return filter;
+};
+
+const hashDeliveryToken = (token) => {
+    return crypto.createHash('sha256').update(token).digest('hex');
+};
+
+const getDeliveryEncryptionKey = () => {
+    const secret = normalizeText(process.env.DELIVERY_QR_ENCRYPTION_SECRET || process.env.JWT_SECRET);
+
+    if (!secret) {
+        throw createServiceError(500, 'Hệ thống chưa cấu hình khóa mã hóa QR', 'DELIVERY_QR_ENCRYPTION_NOT_CONFIGURED');
+    }
+
+    return crypto.createHash('sha256').update(secret).digest();
+};
+
+const encryptDeliveryToken = (token) => {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv(DELIVERY_QR_CIPHER, getDeliveryEncryptionKey(), iv);
+    const encryptedToken = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
+
+    return {
+        encryptedToken: encryptedToken.toString('base64'),
+        encryptionIv: iv.toString('base64'),
+        encryptionAuthTag: cipher.getAuthTag().toString('base64'),
+    };
+};
+
+const decryptDeliveryToken = (verification) => {
+    try {
+        const decipher = crypto.createDecipheriv(
+            DELIVERY_QR_CIPHER,
+            getDeliveryEncryptionKey(),
+            Buffer.from(verification.encryptionIv, 'base64')
+        );
+        decipher.setAuthTag(Buffer.from(verification.encryptionAuthTag, 'base64'));
+
+        return Buffer.concat([
+            decipher.update(Buffer.from(verification.encryptedToken, 'base64')),
+            decipher.final(),
+        ]).toString('utf8');
+    } catch {
+        throw createServiceError(500, 'Không thể giải mã QR hiện tại', 'DELIVERY_QR_DECRYPT_FAILED');
+    }
+};
+
+const selectDeliveryQrSecrets = (query) => {
+    return query.select([
+        '+deliveryVerification.tokenHash',
+        '+deliveryVerification.encryptedToken',
+        '+deliveryVerification.encryptionIv',
+        '+deliveryVerification.encryptionAuthTag',
+    ].join(' '));
+};
+
+const mapAdminDeliveryQr = (order, token) => ({
+    orderCode: order.orderCode,
+    qrContent: `${DELIVERY_QR_PREFIX}${token}`,
+    status: getDeliveryQrSummary(order).status,
+    generatedAt: order.deliveryVerification.generatedAt,
+    expiresAt: order.deliveryVerification.expiresAt,
+    notice: 'QR chỉ dùng để đối chiếu kiện hàng, không chứng minh sản phẩm vật lý bên trong là chính hãng hoặc nguyên vẹn.',
+});
+
+const parseDeliveryQrContent = (value) => {
+    const qrContent = normalizeText(value);
+
+    if (!qrContent.startsWith(DELIVERY_QR_PREFIX)) {
+        throw createServiceError(400, 'QR không đúng định dạng của SmartZone', 'INVALID_DELIVERY_QR');
+    }
+
+    const token = qrContent.slice(DELIVERY_QR_PREFIX.length);
+    if (!DELIVERY_QR_TOKEN_PATTERN.test(token)) {
+        throw createServiceError(400, 'QR không hợp lệ hoặc đã bị thay đổi', 'INVALID_DELIVERY_QR');
+    }
+
+    return token.toLowerCase();
+};
+
+const getDeliveryQrSummary = (order) => {
+    const verification = order?.deliveryVerification || {};
+
+    if (!verification.generatedAt || !verification.expiresAt) {
+        return {
+            status: 'NOT_CREATED',
+            generatedAt: null,
+            expiresAt: null,
+            lastVerifiedAt: null,
+            verificationCount: 0,
+        };
+    }
+
+    if (verification.tokenHash && !verification.encryptedToken) {
+        return {
+            status: 'LEGACY',
+            generatedAt: verification.generatedAt,
+            expiresAt: verification.expiresAt,
+            lastVerifiedAt: verification.lastVerifiedAt || null,
+            verificationCount: Number(verification.verificationCount || 0),
+        };
+    }
+
+    const isRevoked = Boolean(verification.revokedAt);
+    const isExpired = new Date(verification.expiresAt).getTime() <= Date.now();
+
+    return {
+        status: isRevoked ? 'REVOKED' : isExpired ? 'EXPIRED' : 'ACTIVE',
+        generatedAt: verification.generatedAt,
+        expiresAt: verification.expiresAt,
+        lastVerifiedAt: verification.lastVerifiedAt || null,
+        verificationCount: Number(verification.verificationCount || 0),
+    };
+};
+
+const maskPhoneNumber = (value) => {
+    const phone = normalizeText(value);
+
+    if (phone.length <= 3) {
+        return '*'.repeat(phone.length);
+    }
+
+    return `${'*'.repeat(phone.length - 3)}${phone.slice(-3)}`;
 };
 
 const getOrderFilter = (orderIdOrCode) => {
@@ -490,15 +618,19 @@ export const getAdminOrderDetail = async ({ orderIdOrCode }) => {
     }
 
     await autoConfirmExpiredNewOrders();
-    const order = await Order.findOne(getOrderFilter(orderKey))
-        .populate('user', 'email firstName lastName phoneNumber')
-        .lean();
+    const order = await selectDeliveryQrSecrets(
+        Order.findOne(getOrderFilter(orderKey))
+            .populate('user', 'email firstName lastName phoneNumber')
+    ).lean();
 
     if (!order) {
         throw createServiceError(404, 'Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND');
     }
 
-    return mapOrder(order);
+    return {
+        ...mapOrder(order),
+        deliveryQr: getDeliveryQrSummary(order),
+    };
 };
 
 export const updateAdminOrderStatus = async ({ orderIdOrCode, status, note }) => {
@@ -607,6 +739,152 @@ export const resolveAdminCancelRequest = async ({ orderIdOrCode, action, note })
     await order.save();
 
     return mapOrder(order);
+};
+
+export const createAdminDeliveryQr = async ({ orderIdOrCode }) => {
+    const orderKey = normalizeText(orderIdOrCode);
+    if (!orderKey) {
+        throw createServiceError(400, 'Mã đơn hàng không hợp lệ', 'INVALID_ORDER_KEY');
+    }
+
+    const order = await selectDeliveryQrSecrets(Order.findOne(getOrderFilter(orderKey)));
+
+    if (!order) {
+        throw createServiceError(404, 'Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND');
+    }
+
+    if (!DELIVERY_QR_CREATABLE_STATUSES.includes(order.status)) {
+        throw createServiceError(400, 'Chỉ có thể tạo QR khi đơn hàng đang giao hoặc đã giao', 'DELIVERY_QR_STATUS_NOT_ALLOWED', {
+            currentStatus: order.status,
+            allowedStatuses: DELIVERY_QR_CREATABLE_STATUSES,
+        });
+    }
+
+    const currentVerification = order.deliveryVerification || {};
+    if (currentVerification.tokenHash) {
+        if (!currentVerification.encryptedToken || !currentVerification.encryptionIv || !currentVerification.encryptionAuthTag) {
+            throw createServiceError(
+                409,
+                'QR cũ được tạo trước phiên bản lưu trữ an toàn và không thể xem lại. Chỉ tạo lại sau khi chắc chắn tem cũ chưa được gửi đi',
+                'DELIVERY_QR_LEGACY_TOKEN'
+            );
+        }
+
+        return mapAdminDeliveryQr(order, decryptDeliveryToken(currentVerification));
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const generatedAt = new Date();
+    const expiresAt = new Date(generatedAt.getTime() + DELIVERY_QR_TTL_DAYS * 24 * 60 * 60 * 1000);
+    const encryptedToken = encryptDeliveryToken(token);
+
+    order.deliveryVerification = {
+        tokenHash: hashDeliveryToken(token),
+        ...encryptedToken,
+        generatedAt,
+        expiresAt,
+        revokedAt: null,
+        lastVerifiedAt: null,
+        verificationCount: 0,
+    };
+
+    await order.save();
+
+    return mapAdminDeliveryQr(order, token);
+};
+
+export const getAdminDeliveryQr = async ({ orderIdOrCode }) => {
+    const orderKey = normalizeText(orderIdOrCode);
+    if (!orderKey) {
+        throw createServiceError(400, 'Mã đơn hàng không hợp lệ', 'INVALID_ORDER_KEY');
+    }
+
+    const order = await selectDeliveryQrSecrets(Order.findOne(getOrderFilter(orderKey)));
+    if (!order) {
+        throw createServiceError(404, 'Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND');
+    }
+
+    const verification = order.deliveryVerification || {};
+    if (!verification.tokenHash) {
+        throw createServiceError(404, 'Đơn hàng chưa có QR kiện hàng', 'DELIVERY_QR_NOT_CREATED');
+    }
+
+    if (!verification.encryptedToken || !verification.encryptionIv || !verification.encryptionAuthTag) {
+        throw createServiceError(409, 'QR hiện tại không thể khôi phục từ phiên bản dữ liệu cũ', 'DELIVERY_QR_LEGACY_TOKEN');
+    }
+
+    return mapAdminDeliveryQr(order, decryptDeliveryToken(verification));
+};
+
+export const verifyMyDeliveryQr = async ({ userId, qrContent }) => {
+    if (!mongoose.isValidObjectId(userId)) {
+        throw createServiceError(400, 'Người dùng không hợp lệ', 'INVALID_OBJECT_ID');
+    }
+
+    const token = parseDeliveryQrContent(qrContent);
+    const tokenHash = hashDeliveryToken(token);
+    const order = await Order.findOne({ 'deliveryVerification.tokenHash': tokenHash })
+        .select('+deliveryVerification.tokenHash')
+        .lean();
+
+    if (!order) {
+        throw createServiceError(404, 'Không thể xác minh kiện hàng. QR không hợp lệ, đã bị thay đổi hoặc đã bị vô hiệu hóa', 'DELIVERY_QR_NOT_FOUND');
+    }
+
+    if (String(order.user) !== String(userId)) {
+        throw createServiceError(403, 'QR không khớp với bất kỳ đơn hàng nào của tài khoản này', 'DELIVERY_QR_OWNER_MISMATCH');
+    }
+
+    const verification = order.deliveryVerification || {};
+    if (verification.revokedAt) {
+        throw createServiceError(410, 'QR của kiện hàng đã bị vô hiệu hóa', 'DELIVERY_QR_REVOKED');
+    }
+
+    if (!verification.expiresAt || new Date(verification.expiresAt).getTime() <= Date.now()) {
+        throw createServiceError(410, 'QR của kiện hàng đã hết hạn, vui lòng liên hệ SmartZone', 'DELIVERY_QR_EXPIRED');
+    }
+
+    if (order.status === 'CANCELLED') {
+        throw createServiceError(409, 'Đơn hàng đã bị hủy. Không nên thanh toán hoặc nhận kiện hàng này', 'DELIVERY_ORDER_CANCELLED');
+    }
+
+    const isShipping = order.status === 'SHIPPING';
+    const isDelivered = order.status === 'DELIVERED';
+
+    if (!isShipping && !isDelivered) {
+        throw createServiceError(409, 'Đơn hàng không ở trạng thái giao hàng. Vui lòng liên hệ SmartZone trước khi nhận kiện', 'DELIVERY_ORDER_STATUS_MISMATCH', {
+            currentStatus: order.status,
+        });
+    }
+
+    await Order.updateOne(
+        { _id: order._id, 'deliveryVerification.tokenHash': tokenHash },
+        {
+            $set: { 'deliveryVerification.lastVerifiedAt': new Date() },
+            $inc: { 'deliveryVerification.verificationCount': 1 },
+        }
+    );
+
+    return {
+        verificationLevel: isShipping ? 'VERIFIED' : 'REVIEW',
+        message: isShipping
+            ? 'QR hợp lệ và kiện hàng khớp với đơn đang giao của bạn'
+            : 'QR hợp lệ và đúng đơn của bạn, nhưng đơn đã được hệ thống ghi nhận là đã giao',
+        order: {
+            orderCode: order.orderCode,
+            items: order.items,
+            totalAmount: order.totalAmount,
+            paymentMethod: order.paymentMethod,
+            paymentStatus: order.paymentStatus,
+            status: order.status,
+            shippingInfo: {
+                fullName: order.shippingInfo?.fullName || '',
+                maskedPhone: maskPhoneNumber(order.shippingInfo?.phone),
+                city: order.shippingInfo?.city || '',
+            },
+        },
+        notice: 'QR chỉ xác nhận kiện hàng được liên kết với đơn trên SmartZone. Hãy kiểm tra niêm phong và sản phẩm thực tế trước khi nhận.',
+    };
 };
 
 export { OrderServiceError };
