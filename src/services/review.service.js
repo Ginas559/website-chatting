@@ -4,6 +4,7 @@ import Product from '../models/product.model.js';
 import Review from '../models/review.model.js';
 import User from '../models/user.js';
 import { normalizeText } from './checkout.helper.js';
+import { createNotification } from '../utils/notification';
 
 const DEFAULT_REVIEW_PAGE_SIZE = 6;
 const MAX_REVIEW_PAGE_SIZE = 20;
@@ -390,6 +391,15 @@ export const createProductReview = async ({ userId, productSlug, orderCode, rati
 
             createdReview = review;
         });
+
+        // Trigger Notification for Admin (R1) and Moderator (R3)
+        createNotification({
+            recipientRole: 'R1',
+            type: 'NEW_REVIEW',
+            title: 'Đánh giá sản phẩm mới',
+            content: `Một đánh giá mới (${normalizedRating} sao) cho sản phẩm "${product.name}" vừa được gửi bởi người dùng.`,
+            link: `/product/${product.slug}#reviews`
+        }).catch(err => console.error('Review notification error:', err));
 
         return {
             review: mapReview(createdReview),

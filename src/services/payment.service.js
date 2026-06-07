@@ -12,6 +12,7 @@ import {
     ignoreLogger,
 } from 'vnpay';
 import Order from '../models/order.model.js';
+import { createNotification } from '../utils/notification';
 import {
     applyStockForOrderItems,
     buildOrderDraftFromCart,
@@ -158,6 +159,15 @@ const confirmPaidOrder = async (order, verifyResult, session) => {
 
     await order.save({ session });
     await clearOrderedItemsFromCart(order.user, order.items, session);
+
+    // Trigger notification for Admin (R1) and Moderator (R3)
+    createNotification({
+        recipientRole: 'R1',
+        type: 'NEW_ORDER',
+        title: 'Đơn hàng mới (VNPay)',
+        content: `Đơn hàng ${order.orderCode} trị giá ${Number(order.totalAmount).toLocaleString('vi-VN')}đ đã được thanh toán qua VNPay thành công.`,
+        link: `/admin/orders`
+    }).catch(err => console.error('VNPay checkout notification error:', err));
 };
 
 const buildVnpayPaymentUrl = ({ order, ipAddr, bankCode }) => {
