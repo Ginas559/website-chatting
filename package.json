@@ -5,6 +5,8 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "test:delivery-qr": "babel-node scripts/deliveryVerification.smoke.js",
+    "migrate:delivery-qr": "babel-node scripts/migrateLegacyDeliveryQr.js",
     "start": "nodemon --exec babel-node src/server.js"
   },
   "keywords": [],

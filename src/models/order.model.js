@@ -78,6 +78,21 @@ const paymentInfoSchema = new mongoose.Schema(
     { _id: false }
 );
 
+const deliveryVerificationSchema = new mongoose.Schema(
+    {
+        tokenHash: { type: String, default: '', select: false },
+        encryptedToken: { type: String, default: '', select: false },
+        encryptionIv: { type: String, default: '', select: false },
+        encryptionAuthTag: { type: String, default: '', select: false },
+        generatedAt: { type: Date },
+        expiresAt: { type: Date },
+        revokedAt: { type: Date },
+        lastVerifiedAt: { type: Date },
+        verificationCount: { type: Number, default: 0, min: 0 },
+    },
+    { _id: false }
+);
+
 const orderSchema = new mongoose.Schema(
     {
         orderCode: { type: String, required: true, unique: true, trim: true },
@@ -128,6 +143,10 @@ const orderSchema = new mongoose.Schema(
             type: [statusHistorySchema],
             default: () => [{ status: 'NEW', note: 'Đơn hàng mới được tạo', changedAt: new Date() }],
         },
+        deliveryVerification: {
+            type: deliveryVerificationSchema,
+            default: () => ({}),
+        },
     },
     {
         timestamps: true,
@@ -136,6 +155,7 @@ const orderSchema = new mongoose.Schema(
 
 orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
+orderSchema.index({ 'deliveryVerification.tokenHash': 1 }, { sparse: true });
 
 const Order = mongoose.model('Order', orderSchema);
 
