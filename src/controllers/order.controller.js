@@ -1,6 +1,8 @@
 import {
     cancelMyOrder,
     checkoutOrder,
+    createAdminDeliveryQr,
+    getAdminDeliveryQr,
     getAdminOrderDetail,
     getAdminOrders,
     getMyOrderDetail,
@@ -8,6 +10,7 @@ import {
     OrderServiceError,
     resolveAdminCancelRequest,
     updateAdminOrderStatus,
+    verifyMyDeliveryQr,
 } from '../services/order.service.js';
 import { createVnpayPaymentForExistingOrder, createVnpayPaymentFromCart, PaymentServiceError } from '../services/payment.service.js';
 
@@ -25,6 +28,7 @@ const sendErrorResponse = (res, { status, message, error }) => {
         success: false,
         errCode: status === 404 ? 1 : status === 401 ? -2 : status === 403 ? -3 : -1,
         errMessage: message,
+        errorCode: error?.code || null,
         error: error?.details || error?.message || null,
     });
 };
@@ -253,6 +257,64 @@ export const resolveAdminCancelRequestController = async (req, res) => {
         return sendErrorResponse(res, {
             status: error instanceof OrderServiceError ? error.statusCode : 500,
             message: error instanceof OrderServiceError ? error.message : 'Lỗi server khi xử lý yêu cầu hủy đơn',
+            error,
+        });
+    }
+};
+
+export const createAdminDeliveryQrController = async (req, res) => {
+    try {
+        const result = await createAdminDeliveryQr({
+            orderIdOrCode: req.params?.orderIdOrCode,
+        });
+
+        return sendSuccessResponse(res, {
+            message: 'Tạo QR kiểm tra kiện hàng thành công',
+            data: result,
+        });
+    } catch (error) {
+        return sendErrorResponse(res, {
+            status: error instanceof OrderServiceError ? error.statusCode : 500,
+            message: error instanceof OrderServiceError ? error.message : 'Lỗi server khi tạo QR kiện hàng',
+            error,
+        });
+    }
+};
+
+export const getAdminDeliveryQrController = async (req, res) => {
+    try {
+        const result = await getAdminDeliveryQr({
+            orderIdOrCode: req.params?.orderIdOrCode,
+        });
+
+        return sendSuccessResponse(res, {
+            message: 'Lấy QR kiểm tra kiện hàng thành công',
+            data: result,
+        });
+    } catch (error) {
+        return sendErrorResponse(res, {
+            status: error instanceof OrderServiceError ? error.statusCode : 500,
+            message: error instanceof OrderServiceError ? error.message : 'Lỗi server khi lấy QR kiện hàng',
+            error,
+        });
+    }
+};
+
+export const verifyMyDeliveryQrController = async (req, res) => {
+    try {
+        const result = await verifyMyDeliveryQr({
+            userId: getUserIdFromRequest(req),
+            qrContent: req.body?.qrContent,
+        });
+
+        return sendSuccessResponse(res, {
+            message: result.message,
+            data: result,
+        });
+    } catch (error) {
+        return sendErrorResponse(res, {
+            status: error instanceof OrderServiceError ? error.statusCode : 500,
+            message: error instanceof OrderServiceError ? error.message : 'Lỗi server khi xác minh QR kiện hàng',
             error,
         });
     }
