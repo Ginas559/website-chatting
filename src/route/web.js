@@ -26,6 +26,7 @@ import initCartRoutes from "./cart.route.js";
 import initOrderRoutes from "./order.route.js";
 import initPaymentRoutes from "./payment.route.js";
 import initReviewRoutes from "./review.route.js";
+import initNotificationRoutes from "./notification.route.js";
 
 let router = express.Router();
 
@@ -47,6 +48,7 @@ let initWebRoutes = (app) => {
 
     router.get('/api/articles/home', articleController.getHomeArticles);
     router.get('/api/articles/:slug', articleController.getArticleDetail);
+    router.post('/api/admin/articles', authenticateToken, authorizeAdmin, articleController.createArticleController);
 
     router.get('/user/profile', authenticateToken, authorizeUser, loginController.getUserProfile);
     router.get('/admin/profile', authenticateToken, authorizeAdmin, loginController.getAdminProfile);
@@ -56,6 +58,7 @@ let initWebRoutes = (app) => {
     initOrderRoutes(app);
     initPaymentRoutes(app);
     initReviewRoutes(app);
+    initNotificationRoutes(app);
 
     router.get('/admin/users', authenticateToken, authorizeRoles('R1', 'R3'), userManagementController.listUsers);
     router.post('/admin/users', authenticateToken, authorizeAdmin, createUserValidator, userManagementController.createUser);

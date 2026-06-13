@@ -1,12 +1,18 @@
 import express from "express";
+import http from "http";
 import bodyParser from "body-parser";
 import cors from "cors";
 import connectDB from "./config/connectDB";
 import initWebRoutes from "./route/web";
+import { initSocket } from "./config/socket";
 
 require('dotenv').config();
 
 let app = express();
+const server = http.createServer(app);
+
+// Initialize Socket.io
+initSocket(server);
 
 // Enable CORS
 app.use(cors({
@@ -31,7 +37,7 @@ const startServer = async () => {
         
         let port = process.env.PORT || 8088;
         
-        app.listen(port, () => {
+        server.listen(port, () => {
             console.log("Backend Nodejs (MongoDB) đang chạy tại port: " + port);
         });
     } catch (error) {

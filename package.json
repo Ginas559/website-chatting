@@ -4,7 +4,7 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "mocha --require @babel/register test/**/*.test.js --timeout 10000 --exit",
     "test:delivery-qr": "babel-node scripts/deliveryVerification.smoke.js",
     "migrate:delivery-qr": "babel-node scripts/migrateLegacyDeliveryQr.js",
     "start": "nodemon --exec babel-node src/server.js"
@@ -24,12 +24,17 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.6.1",
     "nodemailer": "^8.0.7",
+    "socket.io": "^4.8.3",
     "vnpay": "^2.5.0"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
     "@babel/node": "^7.29.0",
     "@babel/preset-env": "^7.29.3",
-    "nodemon": "^3.1.14"
+    "@babel/register": "^7.29.7",
+    "chai": "^6.2.2",
+    "mocha": "^11.7.6",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.2.2"
   }
 }

@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import mongoose from 'mongoose';
 import Order from '../models/order.model.js';
 import { applyStockForOrderItems, buildOrderDraftFromCart, clearCart, mapOrder, normalizeText } from './checkout.helper.js';
+import { createNotification } from '../utils/notification';
 
 const DEFAULT_PAYMENT_METHOD = 'COD';
 const SUPPORTED_PAYMENT_METHODS = ['COD'];
@@ -407,6 +408,15 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod }) => 
             createdOrder = order;
         });
 
+        // Trigger Notification for Admin (R1) and Moderator (R3)
+        createNotification({
+            recipientRole: 'R1',
+            type: 'NEW_ORDER',
+            title: 'Đơn hàng mới',
+            content: `Khách hàng đã đặt đơn hàng ${createdOrder.orderCode} trị giá ${Number(createdOrder.totalAmount).toLocaleString('vi-VN')}đ.`,
+            link: `/admin/orders`
+        }).catch(err => console.error('Checkout notification error:', err));
+
         return mapOrder(createdOrder);
     } finally {
         await session.endSession();
@@ -690,6 +700,15 @@ export const updateAdminOrderStatus = async ({ orderIdOrCode, status, note }) =>
 
     await order.save();
 
+    // Trigger Notification for the Customer (User)
+    createNotification({
+        recipientId: order.user,
+        type: 'ORDER_STATUS_UPDATE',
+        title: 'Cập nhật trạng thái đơn hàng',
+        content: `Đơn hàng ${order.orderCode} của bạn đã chuyển sang trạng thái: ${nextStatus}. Ghi chú: ${adminNote || 'Không có'}`,
+        link: `/orders`
+    }).catch(err => console.error('Order status update notification error:', err));
+
     return mapOrder(order);
 };
 
@@ -737,6 +756,17 @@ export const resolveAdminCancelRequest = async ({ orderIdOrCode, action, note })
     }
 
     await order.save();
+
+    // Trigger Notification for the Customer (User)
+    const actionText = action === 'APPROVE' ? 'được chấp nhận' : 'bị từ chối';
+    const statusText = action === 'APPROVE' ? 'Đã hủy' : 'Đang chuẩn bị hàng';
+    createNotification({
+        recipientId: order.user,
+        type: 'ORDER_STATUS_UPDATE',
+        title: 'Yêu cầu hủy đơn hàng',
+        content: `Yêu cầu hủy đơn hàng ${order.orderCode} của bạn đã ${actionText}. Trạng thái hiện tại: ${statusText}. Ghi chú: ${adminNote || 'Không có'}`,
+        link: `/orders`
+    }).catch(err => console.error('Cancel request resolution notification error:', err));
 
     return mapOrder(order);
 };
