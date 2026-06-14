@@ -76,15 +76,19 @@ const decorateArticleSeed = (item) => ({
 });
 
 export const seedInitialData = async () => {
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@smartzone.vn';
-    const adminPassword = process.env.ADMIN_PASSWORD || '123456';
+    const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase().trim();
+    const adminPassword = process.env.ADMIN_PASSWORD;
 
-    const adminExisted = await User.findOne({ email: adminEmail.toLowerCase().trim() });
+    if (!adminEmail || !adminPassword) {
+        throw new Error('ADMIN_EMAIL và ADMIN_PASSWORD phải được cấu hình trong biến môi trường trước khi seed admin.');
+    }
+
+    const adminExisted = await User.findOne({ email: adminEmail });
     if (!adminExisted) {
         const passwordHash = await bcrypt.hash(adminPassword, 10);
 
         await User.create({
-            email: adminEmail.toLowerCase().trim(),
+            email: adminEmail,
             password: passwordHash,
             firstName: 'Super',
             lastName: 'Admin',
@@ -95,7 +99,7 @@ export const seedInitialData = async () => {
             positionId: 'P0',
             isActive: true,
         });
-        console.log('Da seed tai khoan admin R1 mac dinh.');
+        console.log('Da seed tai khoan admin R1 tu bien moi truong.');
     }
 
     await Article.bulkWrite(
