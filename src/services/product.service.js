@@ -5,7 +5,7 @@ import Review from '../models/review.model.js';
 import mongoose from 'mongoose';
 
 const PRODUCT_SELECT_FIELDS =
-    'name slug brand category image images price oldPrice discount stock soldCount rating views description shortDescription isPromotion isLatest isBestSeller';
+    'name slug brand category image images price oldPrice discount stock soldCount rating views description shortDescription isPromotion isLatest isBestSeller isActive isDeleted createdAt updatedAt';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_SEARCH_PAGE_SIZE = 12;
@@ -89,6 +89,82 @@ const getProductStatsMap = async (productIds = []) => {
 
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const makeSlug = (value) => String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+const ensureUniqueSlug = async (name, ignoredId = null) => {
+    const baseSlug = makeSlug(name) || `product-${Date.now()}`;
+    let slug = baseSlug;
+    let counter = 1;
+
+    while (await Product.exists({ slug, ...(ignoredId ? { _id: { $ne: ignoredId } } : {}) })) {
+        slug = `${baseSlug}-${counter}`;
+        counter += 1;
+    }
+
+    return slug;
+};
+
+const mapAdminProduct = (product) => ({
+    _id: String(product._id),
+    id: String(product._id),
+    name: product.name,
+    slug: product.slug,
+    brand: product.brand,
+    category: product.category,
+    image: product.image,
+    images: Array.isArray(product.images) ? product.images : [],
+    price: product.oldPrice || product.price,
+    salePrice: product.price,
+    oldPrice: product.oldPrice,
+    stock: product.stock,
+    soldCount: product.soldCount,
+    description: product.description,
+    shortDescription: product.shortDescription,
+    status: product.isActive ? 'ACTIVE' : 'INACTIVE',
+    isActive: product.isActive,
+    isPromotion: product.isPromotion,
+    isLatest: product.isLatest,
+    isBestSeller: product.isBestSeller,
+    createdAt: product.createdAt,
+    updatedAt: product.updatedAt,
+});
+
+const normalizeAdminProductPayload = (payload = {}) => {
+    const price = Number(payload.price);
+    const salePrice = payload.salePrice === undefined || payload.salePrice === null || payload.salePrice === ''
+        ? price
+        : Number(payload.salePrice);
+    const images = Array.isArray(payload.images)
+        ? payload.images.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+    const mainImage = String(payload.image || images[0] || '').trim();
+
+    return {
+        name: String(payload.name || '').trim(),
+        brand: String(payload.brand || '').trim(),
+        category: String(payload.category || '').trim(),
+        image: mainImage || 'https://via.placeholder.com/600x600?text=SmartZone',
+        images: mainImage && !images.includes(mainImage) ? [mainImage, ...images] : images,
+        price: salePrice,
+        oldPrice: price,
+        discount: price > 0 ? Math.max(0, Math.round(((price - salePrice) / price) * 100)) : 0,
+        stock: Number(payload.stock || 0),
+        description: String(payload.description || '').trim(),
+        shortDescription: String(payload.shortDescription || payload.description || '').trim(),
+        isActive: (payload.status || 'ACTIVE') === 'ACTIVE',
+        isPromotion: Boolean(payload.isPromotion),
+        isLatest: Boolean(payload.isLatest),
+        isBestSeller: Boolean(payload.isBestSeller),
+    };
+};
+
 const toPositiveInteger = (value, fallback) => {
     const parsedValue = Number(value);
 
@@ -153,7 +229,7 @@ const getPaginatedProducts = async ({ filter, sort, page, limit, defaultLimit, m
 };
 
 const buildSearchFilter = (query = {}) => {
-    const filter = { isActive: true };
+    const filter = { isActive: true, isDeleted: { $ne: true } };
     const {
         q,
         category,
@@ -286,25 +362,25 @@ export const getHomeSections = async ({ limit = DEFAULT_HOME_SECTION_PAGE_SIZE, 
 
     const [promotion, latest, bestseller, mostViewed] = await Promise.all([
         getPagedSectionProducts({
-            filter: { isActive: true, isPromotion: true },
+            filter: { isActive: true, isDeleted: { $ne: true }, isPromotion: true },
             sort: { discount: -1, createdAt: -1 },
             page: promotionPage,
             limit: safeLimit,
         }),
         getPagedSectionProducts({
-            filter: { isActive: true, isLatest: true },
+            filter: { isActive: true, isDeleted: { $ne: true }, isLatest: true },
             sort: { createdAt: -1 },
             page: latestPage,
             limit: safeLimit,
         }),
         getPagedSectionProducts({
-            filter: { isActive: true, isBestSeller: true },
+            filter: { isActive: true, isDeleted: { $ne: true }, isBestSeller: true },
             sort: { soldCount: -1, rating: -1, createdAt: -1 },
             page: bestsellerPage,
             limit: safeLimit,
         }),
         getPagedSectionProducts({
-            filter: { isActive: true },
+            filter: { isActive: true, isDeleted: { $ne: true } },
             sort: { views: -1, soldCount: -1, rating: -1, createdAt: -1 },
             page: mostViewedPage,
             limit: safeLimit,
@@ -321,7 +397,7 @@ export const getHomeSections = async ({ limit = DEFAULT_HOME_SECTION_PAGE_SIZE, 
 
 export const getBestSellerProducts = async ({ page = 1, limit = DEFAULT_HOME_SECTION_PAGE_SIZE } = {}) => {
     return getPagedSectionProducts({
-        filter: { isActive: true, isBestSeller: true },
+        filter: { isActive: true, isDeleted: { $ne: true }, isBestSeller: true },
         sort: { soldCount: -1, views: -1, rating: -1 },
         page,
         limit,
@@ -330,7 +406,7 @@ export const getBestSellerProducts = async ({ page = 1, limit = DEFAULT_HOME_SEC
 
 export const getMostViewedProducts = async ({ page = 1, limit = DEFAULT_HOME_SECTION_PAGE_SIZE } = {}) => {
     return getPagedSectionProducts({
-        filter: { isActive: true },
+        filter: { isActive: true, isDeleted: { $ne: true } },
         sort: { views: -1, soldCount: -1, rating: -1 },
         page,
         limit,
@@ -339,7 +415,7 @@ export const getMostViewedProducts = async ({ page = 1, limit = DEFAULT_HOME_SEC
 
 export const getProductDetailBySlug = async (slug) => {
     const product = await Product.findOneAndUpdate(
-        { slug, isActive: true },
+        { slug, isActive: true, isDeleted: { $ne: true } },
         { $inc: { views: 1 } },
         { new: true }
     )
@@ -352,6 +428,7 @@ export const getProductDetailBySlug = async (slug) => {
 
     const relatedProducts = await Product.find({
         isActive: true,
+        isDeleted: { $ne: true },
         slug: { $ne: slug },
         category: product.category,
     })
@@ -378,7 +455,7 @@ export const toggleFavoriteProductService = async ({ userId, productId }) => {
 
     const [user, product] = await Promise.all([
         User.findById(userObjectId).select('favoriteProducts'),
-        Product.findOne({ _id: productObjectId, isActive: true }).select('_id'),
+        Product.findOne({ _id: productObjectId, isActive: true, isDeleted: { $ne: true } }).select('_id'),
     ]);
 
     if (!user || !product) {
@@ -407,6 +484,7 @@ export const toggleFavoriteProductService = async ({ userId, productId }) => {
         const products = await Product.find({
             _id: { $in: favoriteProductIds.map((id) => new mongoose.Types.ObjectId(id)) },
             isActive: true,
+            isDeleted: { $ne: true },
         })
             .select(PRODUCT_SELECT_FIELDS)
             .lean();
@@ -443,8 +521,9 @@ export const getFavoriteProductsService = async ({ userId }) => {
     }
 
     const products = await Product.find({
-        _id: { $in: favoriteProductIds.map((id) => new mongoose.Types.ObjectId(id)) },
-        isActive: true,
+            _id: { $in: favoriteProductIds.map((id) => new mongoose.Types.ObjectId(id)) },
+            isActive: true,
+            isDeleted: { $ne: true },
     })
         .select(PRODUCT_SELECT_FIELDS)
         .lean();
@@ -464,7 +543,7 @@ export const addRecentlyViewedProductService = async ({ userId, slug }) => {
     const userObjectId = objectIdFrom(userId);
     if (!userObjectId || !slug) return null;
 
-    const product = await Product.findOne({ slug, isActive: true }).select('_id').lean();
+    const product = await Product.findOne({ slug, isActive: true, isDeleted: { $ne: true } }).select('_id').lean();
     if (!product?._id) return null;
 
     const productId = String(product._id);
@@ -494,8 +573,9 @@ export const getRecentlyViewedProductsService = async ({ userId }) => {
     }
 
     const products = await Product.find({
-        _id: { $in: ids.map((id) => new mongoose.Types.ObjectId(id)) },
-        isActive: true,
+            _id: { $in: ids.map((id) => new mongoose.Types.ObjectId(id)) },
+            isActive: true,
+            isDeleted: { $ne: true },
     })
         .select(PRODUCT_SELECT_FIELDS)
         .lean();
@@ -507,4 +587,79 @@ export const getRecentlyViewedProductsService = async ({ userId }) => {
     return {
         items: ordered.map((item) => mapProduct(item, statsMap[String(item._id)])),
     };
+};
+
+export const getAdminProductsService = async (query = {}) => {
+    const page = Math.max(toPositiveInteger(query.page, 1), 1);
+    const limit = Math.min(Math.max(toPositiveInteger(query.limit, 10), 1), 100);
+    const filter = { isDeleted: { $ne: true } };
+
+    if (query.keyword) {
+        const keyword = escapeRegExp(String(query.keyword).trim());
+        filter.$or = [
+            { name: { $regex: keyword, $options: 'i' } },
+            { brand: { $regex: keyword, $options: 'i' } },
+            { category: { $regex: keyword, $options: 'i' } },
+        ];
+    }
+
+    if (query.category) filter.category = String(query.category).trim();
+    if (query.status === 'ACTIVE') filter.isActive = true;
+    if (query.status === 'INACTIVE') filter.isActive = false;
+    if (query.lowStock === 'true') filter.stock = { $lte: Number(query.lowStockThreshold || 5) };
+
+    const skip = (page - 1) * limit;
+    const [totalItems, products] = await Promise.all([
+        Product.countDocuments(filter),
+        Product.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    ]);
+
+    return {
+        items: products.map(mapAdminProduct),
+        pagination: {
+            page,
+            limit,
+            totalItems,
+            totalPages: totalItems > 0 ? Math.ceil(totalItems / limit) : 1,
+        },
+    };
+};
+
+export const createAdminProductService = async (payload, actorId) => {
+    const data = normalizeAdminProductPayload(payload);
+    const slug = await ensureUniqueSlug(data.name);
+    const product = await Product.create({ ...data, slug, createdBy: actorId, updatedBy: actorId });
+    return mapAdminProduct(product);
+};
+
+export const updateAdminProductService = async (id, payload, actorId) => {
+    const product = await Product.findOne({ _id: id, isDeleted: { $ne: true } });
+    if (!product) return null;
+
+    const data = normalizeAdminProductPayload({ ...product.toObject(), ...payload });
+    if (payload.name && payload.name !== product.name) {
+        data.slug = await ensureUniqueSlug(payload.name, id);
+    }
+
+    Object.assign(product, data, { updatedBy: actorId });
+    await product.save();
+    return mapAdminProduct(product);
+};
+
+export const updateAdminProductStatusService = async (id, status, actorId) => {
+    const product = await Product.findOneAndUpdate(
+        { _id: id, isDeleted: { $ne: true } },
+        { isActive: status === 'ACTIVE', updatedBy: actorId },
+        { new: true }
+    ).lean();
+    return product ? mapAdminProduct(product) : null;
+};
+
+export const softDeleteAdminProductService = async (id, actorId) => {
+    const product = await Product.findOneAndUpdate(
+        { _id: id, isDeleted: { $ne: true } },
+        { isDeleted: true, isActive: false, updatedBy: actorId },
+        { new: true }
+    ).lean();
+    return product ? mapAdminProduct(product) : null;
 };

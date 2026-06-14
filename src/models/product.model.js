@@ -21,6 +21,9 @@ const productSchema = new mongoose.Schema(
         isBestSeller: { type: Boolean, default: false },
         views: { type: Number, default: 0, min: 0 },
         isActive: { type: Boolean, default: true },
+        isDeleted: { type: Boolean, default: false, index: true },
+        createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     },
     {
         timestamps: true,

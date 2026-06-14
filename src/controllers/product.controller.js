@@ -9,7 +9,13 @@ import {
     getFavoriteProductsService,
     addRecentlyViewedProductService,
     getRecentlyViewedProductsService,
+    getAdminProductsService,
+    createAdminProductService,
+    updateAdminProductService,
+    updateAdminProductStatusService,
+    softDeleteAdminProductService,
 } from '../services/product.service';
+import { validationResult } from 'express-validator';
 
 const sendSuccessResponse = (res, { message, data, pagination, status = 200 }) => {
     return res.status(status).json({
@@ -279,5 +285,66 @@ export const getRecentlyViewedProducts = async (req, res) => {
             logLabel: 'Get Recently Viewed Products Controller Error:',
             error,
         });
+    }
+};
+
+const handleValidation = (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        res.status(400).json({ success: false, message: 'Dữ liệu không hợp lệ', errors: errors.array() });
+        return false;
+    }
+    return true;
+};
+
+export const getAdminProducts = async (req, res) => {
+    try {
+        const data = await getAdminProductsService(req.query || {});
+        return res.json({ success: true, message: 'Lấy danh sách sản phẩm thành công', data });
+    } catch (error) {
+        return sendErrorResponse(res, { status: 500, message: 'Lỗi server khi lấy sản phẩm quản trị', logLabel: 'Admin Product List Error:', error });
+    }
+};
+
+export const createAdminProduct = async (req, res) => {
+    if (!handleValidation(req, res)) return;
+    try {
+        const data = await createAdminProductService(req.body, req.user?.id);
+        return res.status(201).json({ success: true, message: 'Tạo sản phẩm thành công', data });
+    } catch (error) {
+        return sendErrorResponse(res, { status: 500, message: 'Lỗi server khi tạo sản phẩm', logLabel: 'Admin Product Create Error:', error });
+    }
+};
+
+export const updateAdminProduct = async (req, res) => {
+    if (!handleValidation(req, res)) return;
+    try {
+        const data = await updateAdminProductService(req.params.id, req.body, req.user?.id);
+        if (!data) return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm' });
+        return res.json({ success: true, message: 'Cập nhật sản phẩm thành công', data });
+    } catch (error) {
+        return sendErrorResponse(res, { status: 500, message: 'Lỗi server khi cập nhật sản phẩm', logLabel: 'Admin Product Update Error:', error });
+    }
+};
+
+export const updateAdminProductStatus = async (req, res) => {
+    if (!handleValidation(req, res)) return;
+    try {
+        const data = await updateAdminProductStatusService(req.params.id, req.body.status, req.user?.id);
+        if (!data) return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm' });
+        return res.json({ success: true, message: 'Cập nhật trạng thái sản phẩm thành công', data });
+    } catch (error) {
+        return sendErrorResponse(res, { status: 500, message: 'Lỗi server khi cập nhật trạng thái sản phẩm', logLabel: 'Admin Product Status Error:', error });
+    }
+};
+
+export const deleteAdminProduct = async (req, res) => {
+    if (!handleValidation(req, res)) return;
+    try {
+        const data = await softDeleteAdminProductService(req.params.id, req.user?.id);
+        if (!data) return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm' });
+        return res.json({ success: true, message: 'Xóa mềm sản phẩm thành công', data });
+    } catch (error) {
+        return sendErrorResponse(res, { status: 500, message: 'Lỗi server khi xóa sản phẩm', logLabel: 'Admin Product Delete Error:', error });
     }
 };

@@ -1,6 +1,8 @@
 import express from "express";
 import * as authController from "../controllers/auth.controller.js";
 import * as articleController from '../controllers/article.controller';
+import * as dashboardController from '../controllers/dashboard.controller';
+import * as settingController from '../controllers/setting.controller';
 import loginController from "../controllers/loginController";
 import { 
     registerLimiter, 
@@ -23,6 +25,7 @@ import {
 } from "../middleware/loginMiddleware";
 import userManagementController from "../controllers/userManagement.controller.js";
 import { createUserValidator, updateUserValidator, deleteUserValidator, resetUserPasswordValidator } from "../middleware/userManagement.middleware.js";
+import { updateSettingsValidator } from "../middleware/setting.middleware.js";
 import initProductRoutes from "./product.route.js";
 import initCartRoutes from "./cart.route.js";
 import initOrderRoutes from "./order.route.js";
@@ -46,6 +49,15 @@ let initWebRoutes = (app) => {
     router.post('/api/refresh-token', refreshTokenLimiter, loginController.handleRefreshToken);
     router.post('/api/logout', loginController.handleLogout);
     router.patch('/api/me/password', authenticateToken, changePasswordValidator, loginController.changePassword);
+
+    router.get('/api/admin/dashboard/overview', authenticateToken, authorizeRoles('R1', 'R3'), dashboardController.getOverviewController);
+    router.get('/api/admin/dashboard/revenue', authenticateToken, authorizeRoles('R1', 'R3'), dashboardController.getRevenueController);
+    router.get('/api/admin/dashboard/order-status', authenticateToken, authorizeRoles('R1', 'R3'), dashboardController.getOrderStatusController);
+    router.get('/api/admin/dashboard/top-products', authenticateToken, authorizeRoles('R1', 'R3'), dashboardController.getTopProductsController);
+    router.get('/api/admin/dashboard/recent-orders', authenticateToken, authorizeRoles('R1', 'R3'), dashboardController.getRecentOrdersController);
+
+    router.get('/api/admin/settings', authenticateToken, authorizeRoles('R1', 'R3'), settingController.getSettingsController);
+    router.patch('/api/admin/settings', authenticateToken, authorizeAdmin, updateSettingsValidator, settingController.updateSettingsController);
 
     initProductRoutes(app);
 
