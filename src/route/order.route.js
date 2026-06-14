@@ -1,17 +1,17 @@
 import express from 'express';
 import * as orderController from '../controllers/order.controller.js';
-import { authenticateToken, authorizeAdmin, authorizeUser } from '../middleware/loginMiddleware.js';
+import { authenticateToken, authorizeAdmin, authorizeRoles, authorizeUser } from '../middleware/loginMiddleware.js';
 import { createDeliveryQrLimiter, verifyDeliveryQrLimiter } from '../middleware/deliveryVerification.middleware.js';
 
 const router = express.Router();
 
 const initOrderRoutes = (app) => {
-    router.get('/api/admin/orders', authenticateToken, authorizeAdmin, orderController.getAdminOrdersController);
-    router.get('/api/admin/orders/:orderIdOrCode', authenticateToken, authorizeAdmin, orderController.getAdminOrderDetailController);
-    router.patch('/api/admin/orders/:orderIdOrCode/status', authenticateToken, authorizeAdmin, orderController.updateAdminOrderStatusController);
-    router.patch('/api/admin/orders/:orderIdOrCode/cancel-request', authenticateToken, authorizeAdmin, orderController.resolveAdminCancelRequestController);
-    router.get('/api/admin/orders/:orderIdOrCode/delivery-qr', authenticateToken, authorizeAdmin, orderController.getAdminDeliveryQrController);
-    router.post('/api/admin/orders/:orderIdOrCode/delivery-qr', authenticateToken, authorizeAdmin, createDeliveryQrLimiter, orderController.createAdminDeliveryQrController);
+    router.get('/api/admin/orders', authenticateToken, authorizeRoles('R1', 'R3'), orderController.getAdminOrdersController);
+    router.get('/api/admin/orders/:orderIdOrCode', authenticateToken, authorizeRoles('R1', 'R3'), orderController.getAdminOrderDetailController);
+    router.patch('/api/admin/orders/:orderIdOrCode/status', authenticateToken, authorizeRoles('R1', 'R3'), orderController.updateAdminOrderStatusController);
+    router.patch('/api/admin/orders/:orderIdOrCode/cancel-request', authenticateToken, authorizeRoles('R1', 'R3'), orderController.resolveAdminCancelRequestController);
+    router.get('/api/admin/orders/:orderIdOrCode/delivery-qr', authenticateToken, authorizeRoles('R1', 'R3'), orderController.getAdminDeliveryQrController);
+    router.post('/api/admin/orders/:orderIdOrCode/delivery-qr', authenticateToken, authorizeRoles('R1', 'R3'), createDeliveryQrLimiter, orderController.createAdminDeliveryQrController);
 
     router.post('/api/orders/delivery/verify', authenticateToken, authorizeUser, verifyDeliveryQrLimiter, orderController.verifyMyDeliveryQrController);
     router.get('/api/orders/my', authenticateToken, authorizeUser, orderController.getMyOrdersController);

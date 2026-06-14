@@ -5,6 +5,7 @@ import cors from "cors";
 import connectDB from "./config/connectDB";
 import initWebRoutes from "./route/web";
 import { initSocket } from "./config/socket";
+import { endStaleLivestreamsService } from "./services/livestream.service";
 
 require('dotenv').config();
 
@@ -19,6 +20,8 @@ app.use(cors({
     origin: [
         'http://localhost:5173',
         'http://127.0.0.1:5173',
+        'http://localhost:5174',
+        'http://127.0.0.1:5174',
         'http://localhost:3000',
         'http://127.0.0.1:3000'
     ],
@@ -32,6 +35,10 @@ app.use(bodyParser.urlencoded({ extended: true }));
 const startServer = async () => {
     try {
         await connectDB();
+        const endedLivestreams = await endStaleLivestreamsService();
+        if (endedLivestreams > 0) {
+            console.log(`Đã tự kết thúc ${endedLivestreams} phiên livestream cũ.`);
+        }
         
         initWebRoutes(app);
         

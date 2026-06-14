@@ -1,7 +1,25 @@
 import bcrypt from 'bcryptjs';
 import User from '../models/user.js';
 
-const allowedRoles = ['R1', 'R2', 'R3'];
+const roleLabels = {
+    R1: 'Admin',
+    R2: 'User',
+    R3: 'Manager',
+    R4: 'Shipper',
+};
+
+const getManageableRoles = (actorRoleId) => {
+    if (actorRoleId === 'R1') return ['R3', 'R4'];
+    if (actorRoleId === 'R3') return ['R4'];
+    return [];
+};
+
+const canManageRole = (actorRoleId, targetRoleId) => getManageableRoles(actorRoleId).includes(targetRoleId);
+
+const forbidden = (message = 'Bạn không có quyền thao tác với tài khoản này') => ({
+    errCode: 3,
+    errMessage: message,
+});
 
 const sanitizeUser = (user) => ({
     id: user._id,
@@ -19,13 +37,14 @@ const sanitizeUser = (user) => ({
     updatedAt: user.updatedAt
 });
 
-const listUsers = async () => {
+const listUsers = async (actor = {}) => {
     try {
-        const users = await User.find({}).sort({ createdAt: -1 }).lean();
+        const manageableRoles = getManageableRoles(actor.roleId);
+        const users = await User.find({ roleId: { $in: manageableRoles } }).sort({ createdAt: -1 }).lean();
 
         return {
             errCode: 0,
-            errMessage: 'Lấy danh sách người dùng thành công',
+            errMessage: 'Lấy danh sách tài khoản nội bộ thành công',
             users: users.map((user) => sanitizeUser(user))
         };
     } catch (error) {
@@ -34,9 +53,15 @@ const listUsers = async () => {
     }
 };
 
-const createUser = async (payload) => {
+const createUser = async (payload, actor = {}) => {
     try {
         const email = String(payload.email || '').toLowerCase().trim();
+        const roleId = payload.roleId || (actor.roleId === 'R3' ? 'R4' : 'R3');
+
+        if (!canManageRole(actor.roleId, roleId)) {
+            return forbidden(`${roleLabels[actor.roleId] || 'Tài khoản hiện tại'} không thể tạo ${roleLabels[roleId] || 'role này'}`);
+        }
+
         const existingUser = await User.findOne({ email });
 
         if (existingUser) {
@@ -46,7 +71,6 @@ const createUser = async (payload) => {
             };
         }
 
-        const roleId = allowedRoles.includes(payload.roleId) ? payload.roleId : 'R2';
         const hashedPassword = await bcrypt.hash(payload.password, 10);
 
         const user = await User.create({
@@ -65,7 +89,7 @@ const createUser = async (payload) => {
 
         return {
             errCode: 0,
-            errMessage: 'Tạo người dùng thành công',
+            errMessage: `Tạo tài khoản ${roleLabels[roleId]} thành công`,
             user: sanitizeUser(user)
         };
     } catch (error) {
@@ -74,7 +98,7 @@ const createUser = async (payload) => {
     }
 };
 
-const updateUser = async (userId, payload) => {
+const updateUser = async (userId, payload, actor = {}) => {
     try {
         const user = await User.findById(userId);
 
@@ -83,6 +107,11 @@ const updateUser = async (userId, payload) => {
                 errCode: 1,
                 errMessage: 'Không tìm thấy người dùng'
             };
+        }
+
+        const nextRoleId = payload.roleId || user.roleId;
+        if (!canManageRole(actor.roleId, user.roleId) || !canManageRole(actor.roleId, nextRoleId)) {
+            return forbidden();
         }
 
         if (payload.email) {
@@ -105,15 +134,11 @@ const updateUser = async (userId, payload) => {
             }
         }
 
-        if (payload.password) {
-            user.password = await bcrypt.hash(payload.password, 10);
-        }
-
         await user.save();
 
         return {
             errCode: 0,
-            errMessage: 'Cập nhật người dùng thành công',
+            errMessage: 'Cập nhật tài khoản nội bộ thành công',
             user: sanitizeUser(user)
         };
     } catch (error) {
@@ -122,20 +147,26 @@ const updateUser = async (userId, payload) => {
     }
 };
 
-const deleteUser = async (userId) => {
+const deleteUser = async (userId, actor = {}) => {
     try {
-        const deletedUser = await User.findByIdAndDelete(userId);
+        const user = await User.findById(userId);
 
-        if (!deletedUser) {
+        if (!user) {
             return {
                 errCode: 1,
                 errMessage: 'Không tìm thấy người dùng'
             };
         }
 
+        if (!canManageRole(actor.roleId, user.roleId)) {
+            return forbidden();
+        }
+
+        const deletedUser = await User.findByIdAndDelete(userId);
+
         return {
             errCode: 0,
-            errMessage: 'Xóa người dùng thành công',
+            errMessage: 'Xóa tài khoản nội bộ thành công',
             user: sanitizeUser(deletedUser)
         };
     } catch (error) {
@@ -144,9 +175,39 @@ const deleteUser = async (userId) => {
     }
 };
 
+const resetUserPassword = async (userId, newPassword, actor = {}) => {
+    try {
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return {
+                errCode: 1,
+                errMessage: 'Không tìm thấy người dùng'
+            };
+        }
+
+        if (!canManageRole(actor.roleId, user.roleId)) {
+            return forbidden('Bạn không có quyền reset mật khẩu tài khoản này');
+        }
+
+        user.password = await bcrypt.hash(newPassword, 10);
+        await user.save();
+
+        return {
+            errCode: 0,
+            errMessage: 'Reset mật khẩu tài khoản cấp dưới thành công',
+            user: sanitizeUser(user)
+        };
+    } catch (error) {
+        console.error('Reset User Password Service Error:', error);
+        throw error;
+    }
+};
+
 export default {
     listUsers,
     createUser,
     updateUser,
-    deleteUser
+    deleteUser,
+    resetUserPassword
 };

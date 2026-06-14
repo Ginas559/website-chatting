@@ -1,10 +1,22 @@
 import express from 'express';
 import * as productController from '../controllers/product.controller.js';
-import { authenticateToken, authorizeUser } from '../middleware/loginMiddleware.js';
+import { authenticateToken, authorizeUser, authorizeRoles } from '../middleware/loginMiddleware.js';
+import {
+    createAdminProductValidator,
+    updateAdminProductStatusValidator,
+    updateAdminProductValidator,
+    deleteAdminProductValidator,
+} from '../middleware/adminProduct.middleware.js';
 
 const router = express.Router();
 
 const initProductRoutes = (app) => {
+    router.get('/api/admin/products', authenticateToken, authorizeRoles('R1', 'R3'), productController.getAdminProducts);
+    router.post('/api/admin/products', authenticateToken, authorizeRoles('R1', 'R3'), createAdminProductValidator, productController.createAdminProduct);
+    router.patch('/api/admin/products/:id', authenticateToken, authorizeRoles('R1', 'R3'), updateAdminProductValidator, productController.updateAdminProduct);
+    router.patch('/api/admin/products/:id/status', authenticateToken, authorizeRoles('R1', 'R3'), updateAdminProductStatusValidator, productController.updateAdminProductStatus);
+    router.delete('/api/admin/products/:id', authenticateToken, authorizeRoles('R1'), deleteAdminProductValidator, productController.deleteAdminProduct);
+
     router.get('/api/products/home', productController.getHomeProducts);
     router.get('/api/products/best-seller', productController.getBestSellerProductsController);
     router.get('/api/products/most-viewed', productController.getMostViewedProductsController);

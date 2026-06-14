@@ -392,7 +392,7 @@ export const createProductReview = async ({ userId, productSlug, orderCode, rati
             createdReview = review;
         });
 
-        // Trigger Notification for Admin (R1) and Moderator (R3)
+        // Trigger Notification for Admin (R1) and Manager (R3)
         createNotification({
             recipientRole: 'R1',
             type: 'NEW_REVIEW',

@@ -160,7 +160,7 @@ const confirmPaidOrder = async (order, verifyResult, session) => {
     await order.save({ session });
     await clearOrderedItemsFromCart(order.user, order.items, session);
 
-    // Trigger notification for Admin (R1) and Moderator (R3)
+    // Trigger notification for Admin (R1) and Manager (R3)
     createNotification({
         recipientRole: 'R1',
         type: 'NEW_ORDER',

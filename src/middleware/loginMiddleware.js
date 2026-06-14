@@ -51,7 +51,7 @@ export const refreshTokenLimiter = rateLimit({
 
 /**
  * Tạo middleware phân quyền theo danh sách roleId cho phép.
- * Dùng lại cho Admin/Moderator/User mà không cần viết riêng từng hàm mới.
+ * Dùng lại cho Admin/Manager/Shipper/User mà không cần viết riêng từng hàm mới.
  */
 export const authorizeRoles = (...allowedRoles) => {
     return (req, res, next) => {
@@ -136,11 +136,11 @@ export const authenticateToken = (req, res, next) => {
 
 /**
  * Middleware phân quyền User
- * Chỉ cho phép user có roleId = 'R1' (Admin) hoặc 'R2' (User)
+ * Chỉ cho phép user có roleId = 'R2' (User)
  * Route: /user/profile
  */
 export const authorizeUser = (req, res, next) => {
-    return authorizeRoles('R1', 'R2')(req, res, next);
+    return authorizeRoles('R2')(req, res, next);
 };
 
 /**
@@ -153,9 +153,13 @@ export const authorizeAdmin = (req, res, next) => {
 };
 
 /**
- * Middleware phân quyền Moderator
- * Chỉ cho phép user có roleId = 'R3' (Moderator)
+ * Middleware phân quyền Manager
+ * Chỉ cho phép user có roleId = 'R3' (Manager)
  */
-export const authorizeModerator = (req, res, next) => {
+export const authorizeManager = (req, res, next) => {
     return authorizeRoles('R3')(req, res, next);
+};
+
+export const authorizeShipper = (req, res, next) => {
+    return authorizeRoles('R4')(req, res, next);
 };
