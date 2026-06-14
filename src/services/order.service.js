@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import Order from '../models/order.model.js';
 import { applyStockForOrderItems, buildOrderDraftFromCart, clearCart, mapOrder, normalizeText } from './checkout.helper.js';
 import { createNotification } from '../utils/notification';
+import { recordDeliveredOrderRevenue } from './wallet.service';
 
 const DEFAULT_PAYMENT_METHOD = 'COD';
 const SUPPORTED_PAYMENT_METHODS = ['COD'];
@@ -699,6 +700,10 @@ export const updateAdminOrderStatus = async ({ orderIdOrCode, status, note }) =>
     });
 
     await order.save();
+
+    if (order.status === 'DELIVERED' && order.paymentStatus === 'PAID') {
+        await recordDeliveredOrderRevenue(order);
+    }
 
     // Trigger Notification for the Customer (User)
     createNotification({

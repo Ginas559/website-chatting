@@ -56,6 +56,8 @@ let initWebRoutes = (app) => {
     router.get('/api/admin/dashboard/order-status', authenticateToken, authorizeRoles('R1', 'R3'), dashboardController.getOrderStatusController);
     router.get('/api/admin/dashboard/top-products', authenticateToken, authorizeRoles('R1', 'R3'), dashboardController.getTopProductsController);
     router.get('/api/admin/dashboard/recent-orders', authenticateToken, authorizeRoles('R1', 'R3'), dashboardController.getRecentOrdersController);
+    router.get('/api/admin/dashboard/new-customers', authenticateToken, authorizeRoles('R1', 'R3'), dashboardController.getNewCustomersController);
+    router.get('/api/admin/dashboard/cashflow', authenticateToken, authorizeRoles('R1', 'R3'), dashboardController.getCashflowController);
 
     router.get('/api/admin/settings', authenticateToken, authorizeRoles('R1', 'R3'), settingController.getSettingsController);
     router.patch('/api/admin/settings', authenticateToken, authorizeAdmin, updateSettingsValidator, settingController.updateSettingsController);
