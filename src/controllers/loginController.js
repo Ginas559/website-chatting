@@ -121,8 +121,7 @@ let getAdminProfile = async (req, res) => {
     }
 };
 
-// GET /moderator/profile - Lấy thông tin profile (quyền Moderator)
-let getModeratorProfile = async (req, res) => {
+let getManagerProfile = async (req, res) => {
     try {
         let userId = req.user.id;
         let result = await loginService.getUserProfile(userId);
@@ -133,15 +132,70 @@ let getModeratorProfile = async (req, res) => {
 
         return res.status(200).json({
             errCode: 0,
-            errMessage: 'Lấy thông tin profile thành công (Moderator)',
-            role: 'moderator',
+            errMessage: 'Lấy thông tin profile thành công (Manager)',
+            role: 'manager',
             user: result.user
         });
     } catch (error) {
-        console.error('Moderator Profile Controller Error:', error);
+        console.error('Manager Profile Controller Error:', error);
         return res.status(500).json({
             errCode: -1,
             errMessage: 'Lỗi server khi lấy thông tin profile'
+        });
+    }
+};
+
+let getShipperProfile = async (req, res) => {
+    try {
+        let userId = req.user.id;
+        let result = await loginService.getUserProfile(userId);
+
+        if (result.errCode !== 0) {
+            return res.status(404).json(result);
+        }
+
+        return res.status(200).json({
+            errCode: 0,
+            errMessage: 'Lấy thông tin profile thành công (Shipper)',
+            role: 'shipper',
+            user: result.user
+        });
+    } catch (error) {
+        console.error('Shipper Profile Controller Error:', error);
+        return res.status(500).json({
+            errCode: -1,
+            errMessage: 'Lỗi server khi lấy thông tin profile'
+        });
+    }
+};
+
+let changePassword = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({
+            errCode: -1,
+            errMessage: 'Dữ liệu không hợp lệ',
+            errors: errors.array()
+        });
+    }
+
+    try {
+        const result = await loginService.changePassword({
+            userId: req.user.id,
+            currentPassword: req.body.currentPassword,
+            newPassword: req.body.newPassword
+        });
+
+        if (result.errCode !== 0) {
+            return res.status(400).json(result);
+        }
+
+        return res.status(200).json(result);
+    } catch (error) {
+        console.error('Change Password Controller Error:', error);
+        return res.status(500).json({
+            errCode: -1,
+            errMessage: 'Lỗi server khi đổi mật khẩu'
         });
     }
 };
@@ -152,5 +206,7 @@ module.exports = {
     handleLogout,
     getUserProfile,
     getAdminProfile,
-    getModeratorProfile
+    getManagerProfile,
+    getShipperProfile,
+    changePassword
 };

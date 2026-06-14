@@ -209,9 +209,50 @@ let getUserProfile = async (userId) => {
     }
 };
 
+let changePassword = async ({ userId, currentPassword, newPassword }) => {
+    try {
+        let user = await User.findById(userId);
+
+        if (!user) {
+            return {
+                errCode: 1,
+                errMessage: 'Không tìm thấy người dùng'
+            };
+        }
+
+        const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+        if (!isCurrentPasswordValid) {
+            return {
+                errCode: 2,
+                errMessage: 'Mật khẩu hiện tại không chính xác'
+            };
+        }
+
+        const isSamePassword = await bcrypt.compare(newPassword, user.password);
+        if (isSamePassword) {
+            return {
+                errCode: 3,
+                errMessage: 'Mật khẩu mới không được trùng mật khẩu hiện tại'
+            };
+        }
+
+        user.password = await bcrypt.hash(newPassword, 10);
+        await user.save();
+
+        return {
+            errCode: 0,
+            errMessage: 'Đổi mật khẩu thành công'
+        };
+    } catch (error) {
+        console.error('Change Password Service Error:', error);
+        throw error;
+    }
+};
+
 module.exports = {
     handleUserLogin,
     handleRefreshToken,
     handleLogout,
-    getUserProfile
+    getUserProfile,
+    changePassword
 };

@@ -29,3 +29,8 @@ export const resetPasswordValidator = [
     body('newPassword').isLength({ min: 6 }).withMessage('Mật khẩu mới tối thiểu 6 ký tự'),
     body('tempToken').notEmpty().withMessage('Token xác thực không được để trống')
 ];
+
+export const changePasswordValidator = [
+    body('currentPassword').notEmpty().withMessage('Mật khẩu hiện tại không được để trống'),
+    body('newPassword').isLength({ min: 6 }).withMessage('Mật khẩu mới tối thiểu 6 ký tự')
+];

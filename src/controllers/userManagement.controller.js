@@ -16,7 +16,7 @@ const handleValidation = (req, res) => {
 
 let listUsers = async (req, res) => {
     try {
-        const result = await userManagementService.listUsers();
+        const result = await userManagementService.listUsers(req.user);
         return res.status(200).json(result);
     } catch (error) {
         return res.status(500).json({
@@ -29,18 +29,11 @@ let listUsers = async (req, res) => {
 let createUser = async (req, res) => {
     if (!handleValidation(req, res)) return;
 
-    if (req.user?.roleId === 'R3' && req.body?.roleId === 'R1') {
-        return res.status(403).json({
-            errCode: 3,
-            errMessage: 'Moderator không thể tạo tài khoản Admin'
-        });
-    }
-
     try {
-        const result = await userManagementService.createUser(req.body);
+        const result = await userManagementService.createUser(req.body, req.user);
 
         if (result.errCode !== 0) {
-            return res.status(400).json(result);
+            return res.status(result.errCode === 3 ? 403 : 400).json(result);
         }
 
         return res.status(201).json(result);
@@ -55,19 +48,12 @@ let createUser = async (req, res) => {
 let updateUser = async (req, res) => {
     if (!handleValidation(req, res)) return;
 
-    if (req.user?.roleId === 'R3' && req.body?.roleId === 'R1') {
-        return res.status(403).json({
-            errCode: 3,
-            errMessage: 'Moderator không thể cập nhật role thành Admin'
-        });
-    }
-
     try {
         const { id } = req.params;
-        const result = await userManagementService.updateUser(id, req.body);
+        const result = await userManagementService.updateUser(id, req.body, req.user);
 
         if (result.errCode !== 0) {
-            return res.status(400).json(result);
+            return res.status(result.errCode === 3 ? 403 : 400).json(result);
         }
 
         return res.status(200).json(result);
@@ -92,10 +78,10 @@ let deleteUser = async (req, res) => {
             });
         }
 
-        const result = await userManagementService.deleteUser(id);
+        const result = await userManagementService.deleteUser(id, req.user);
 
         if (result.errCode !== 0) {
-            return res.status(404).json(result);
+            return res.status(result.errCode === 3 ? 403 : 404).json(result);
         }
 
         return res.status(200).json(result);
@@ -107,9 +93,31 @@ let deleteUser = async (req, res) => {
     }
 };
 
+let resetUserPassword = async (req, res) => {
+    if (!handleValidation(req, res)) return;
+
+    try {
+        const { id } = req.params;
+        const { newPassword } = req.body;
+        const result = await userManagementService.resetUserPassword(id, newPassword, req.user);
+
+        if (result.errCode !== 0) {
+            return res.status(result.errCode === 3 ? 403 : 404).json(result);
+        }
+
+        return res.status(200).json(result);
+    } catch (error) {
+        return res.status(500).json({
+            errCode: -1,
+            errMessage: 'Lỗi server khi reset mật khẩu người dùng'
+        });
+    }
+};
+
 module.exports = {
     listUsers,
     createUser,
     updateUser,
-    deleteUser
+    deleteUser,
+    resetUserPassword
 };

@@ -7,7 +7,8 @@ import {
     registerValidator, 
     forgotPasswordLimiter, 
     forgotPasswordValidator, 
-    resetPasswordValidator 
+    resetPasswordValidator,
+    changePasswordValidator 
 } from "../middleware/auth.middleware.js";
 import { 
     loginLimiter, 
@@ -16,11 +17,12 @@ import {
     authenticateToken, 
     authorizeUser, 
     authorizeAdmin,
-    authorizeModerator,
+    authorizeManager,
+    authorizeShipper,
     authorizeRoles 
 } from "../middleware/loginMiddleware";
 import userManagementController from "../controllers/userManagement.controller.js";
-import { createUserValidator, updateUserValidator, deleteUserValidator } from "../middleware/userManagement.middleware.js";
+import { createUserValidator, updateUserValidator, deleteUserValidator, resetUserPasswordValidator } from "../middleware/userManagement.middleware.js";
 import initProductRoutes from "./product.route.js";
 import initCartRoutes from "./cart.route.js";
 import initOrderRoutes from "./order.route.js";
@@ -43,6 +45,7 @@ let initWebRoutes = (app) => {
     router.post('/api/login', loginLimiter, loginValidator, loginController.handleLogin);
     router.post('/api/refresh-token', refreshTokenLimiter, loginController.handleRefreshToken);
     router.post('/api/logout', loginController.handleLogout);
+    router.patch('/api/me/password', authenticateToken, changePasswordValidator, loginController.changePassword);
 
     initProductRoutes(app);
 
@@ -52,7 +55,8 @@ let initWebRoutes = (app) => {
 
     router.get('/user/profile', authenticateToken, authorizeUser, loginController.getUserProfile);
     router.get('/admin/profile', authenticateToken, authorizeAdmin, loginController.getAdminProfile);
-    router.get('/moderator/profile', authenticateToken, authorizeModerator, loginController.getModeratorProfile);
+    router.get('/manager/profile', authenticateToken, authorizeManager, loginController.getManagerProfile);
+    router.get('/shipper/profile', authenticateToken, authorizeShipper, loginController.getShipperProfile);
 
     initCartRoutes(app);
     initOrderRoutes(app);
@@ -61,9 +65,10 @@ let initWebRoutes = (app) => {
     initNotificationRoutes(app);
 
     router.get('/admin/users', authenticateToken, authorizeRoles('R1', 'R3'), userManagementController.listUsers);
-    router.post('/admin/users', authenticateToken, authorizeAdmin, createUserValidator, userManagementController.createUser);
-    router.put('/admin/users/:id', authenticateToken, authorizeAdmin, updateUserValidator, userManagementController.updateUser);
-    router.delete('/admin/users/:id', authenticateToken, authorizeAdmin, deleteUserValidator, userManagementController.deleteUser);
+    router.post('/admin/users', authenticateToken, authorizeRoles('R1', 'R3'), createUserValidator, userManagementController.createUser);
+    router.put('/admin/users/:id', authenticateToken, authorizeRoles('R1', 'R3'), updateUserValidator, userManagementController.updateUser);
+    router.patch('/admin/users/:id/reset-password', authenticateToken, authorizeRoles('R1', 'R3'), resetUserPasswordValidator, userManagementController.resetUserPassword);
+    router.delete('/admin/users/:id', authenticateToken, authorizeRoles('R1', 'R3'), deleteUserValidator, userManagementController.deleteUser);
 
     return app.use("/", router);
 }
