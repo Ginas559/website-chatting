@@ -12,6 +12,8 @@ import {
     ignoreLogger,
 } from 'vnpay';
 import Order from '../models/order.model.js';
+import User from '../models/user.js';
+import Voucher from '../models/voucher.model.js';
 import { createNotification } from '../utils/notification';
 import {
     applyStockForOrderItems,
@@ -19,6 +21,7 @@ import {
     clearOrderedItemsFromCart,
     mapOrder,
     normalizeText,
+    refundOrderDiscounts,
 } from './checkout.helper.js';
 
 const VNPAY_PROVIDER = 'VNPAY';
@@ -116,6 +119,9 @@ const markOrderPaymentFailed = async (order, verifyResult, session) => {
     });
 
     await order.save({ session });
+
+    // Tien - Hoàn trả điểm tích lũy và voucher khi thanh toán thất bại
+    await refundOrderDiscounts({ order, userId: order.user, session });
 };
 
 const markOrderRefundRequired = async (order, verifyResult, note, session) => {
@@ -129,6 +135,9 @@ const markOrderRefundRequired = async (order, verifyResult, note, session) => {
     });
 
     await order.save({ session });
+
+    // Tien - Hoàn trả điểm tích lũy và voucher khi có lỗi cần hoàn tiền
+    await refundOrderDiscounts({ order, userId: order.user, session });
 };
 
 const confirmPaidOrder = async (order, verifyResult, session) => {
@@ -186,7 +195,7 @@ const buildVnpayPaymentUrl = ({ order, ipAddr, bankCode }) => {
     });
 };
 
-export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr, bankCode }) => {
+export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr, bankCode, couponCode, usePoints }) => {
     const session = await mongoose.startSession();
 
     try {
@@ -200,6 +209,106 @@ export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr,
                 createServiceError,
             });
 
+            const subtotal = orderDraft.subtotal;
+            const shippingFee = orderDraft.shippingFee;
+            let couponDiscount = 0;
+            let pointsDiscount = 0;
+            let pointsUsed = 0;
+            const now = new Date();
+
+            // Tien - Kiểm tra và áp dụng mã giảm giá cho VNPAY
+            const cleanCouponCode = String(couponCode || '').trim().toUpperCase();
+            if (cleanCouponCode) {
+                const user = await User.findById(userId).session(session);
+                const userCoupon = (user?.rewardCoupons || []).find(
+                    c => c.code === cleanCouponCode && !c.isUsed && new Date(c.expiresAt) > now
+                );
+
+                if (userCoupon) {
+                    if (subtotal < userCoupon.minOrderAmount) {
+                        throw createServiceError(400, `Đơn hàng chưa đạt giá trị tối thiểu ${userCoupon.minOrderAmount.toLocaleString('vi-VN')}đ để dùng mã này`, 'MIN_ORDER_AMOUNT_NOT_MET');
+                    }
+                    couponDiscount = Math.round((subtotal * userCoupon.discountPercent) / 100);
+
+                    await User.updateOne(
+                        { _id: userId, 'rewardCoupons.code': cleanCouponCode },
+                        { $set: { 'rewardCoupons.$.isUsed': true, 'rewardCoupons.$.usedAt': now } },
+                        { session }
+                    );
+                } else {
+                    const systemVoucher = await Voucher.findOne({
+                        code: cleanCouponCode,
+                        isActive: true,
+                        startDate: { $lte: now },
+                        endDate: { $gte: now }
+                    }).session(session);
+
+                    if (!systemVoucher) {
+                        throw createServiceError(400, 'Mã giảm giá không tồn tại hoặc đã hết hạn', 'VOUCHER_INVALID');
+                    }
+
+                    if (subtotal < systemVoucher.minOrderAmount) {
+                        throw createServiceError(400, `Đơn hàng chưa đạt giá trị tối thiểu ${systemVoucher.minOrderAmount.toLocaleString('vi-VN')}đ để dùng mã này`, 'MIN_ORDER_AMOUNT_NOT_MET');
+                    }
+
+                    if (systemVoucher.usedCount >= systemVoucher.usageLimit) {
+                        throw createServiceError(400, 'Mã giảm giá đã hết lượt sử dụng', 'VOUCHER_OUT_OF_STOCK');
+                    }
+
+                    const alreadyUsed = await Order.findOne({
+                        user: userId,
+                        couponCode: cleanCouponCode,
+                        status: { $ne: 'CANCELLED' }
+                    }).session(session).lean();
+
+                    if (alreadyUsed) {
+                        throw createServiceError(400, 'Bạn đã sử dụng mã giảm giá này cho đơn hàng khác rồi', 'VOUCHER_ALREADY_USED');
+                    }
+
+                    if (systemVoucher.discountType === 'PERCENT') {
+                        couponDiscount = Math.round((subtotal * systemVoucher.discountValue) / 100);
+                        if (systemVoucher.maxDiscountAmount > 0) {
+                            couponDiscount = Math.min(couponDiscount, systemVoucher.maxDiscountAmount);
+                        }
+                    } else if (systemVoucher.discountType === 'AMOUNT') {
+                        couponDiscount = systemVoucher.discountValue;
+                    }
+
+                    systemVoucher.usedCount += 1;
+                    await systemVoucher.save({ session });
+                }
+            }
+
+            // Tien - Kiểm tra và áp dụng điểm tích lũy cho VNPAY
+            if (usePoints) {
+                const user = await User.findById(userId).session(session);
+                const userPoints = user?.rewardPoints || 0;
+
+                if (userPoints > 0) {
+                    const rate = 1000;
+                    const remainingAmount = subtotal + shippingFee - couponDiscount;
+                    const maxPointsDiscount = Math.max(0, remainingAmount);
+                    const potentialPointsDiscount = userPoints * rate;
+
+                    if (potentialPointsDiscount <= maxPointsDiscount) {
+                        pointsDiscount = potentialPointsDiscount;
+                        pointsUsed = userPoints;
+                    } else {
+                        pointsDiscount = maxPointsDiscount;
+                        pointsUsed = Math.ceil(maxPointsDiscount / rate);
+                    }
+
+                    await User.updateOne(
+                        { _id: userId },
+                        { $inc: { rewardPoints: -pointsUsed } },
+                        { session }
+                    );
+                }
+            }
+
+            const discountAmount = couponDiscount + pointsDiscount;
+            const totalAmount = Math.max(0, subtotal + shippingFee - discountAmount);
+
             const [order] = await Order.create(
                 [
                     {
@@ -207,9 +316,14 @@ export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr,
                         user: userId,
                         items: orderDraft.orderItems,
                         shippingInfo: orderDraft.shippingInfo,
-                        subtotal: orderDraft.subtotal,
-                        shippingFee: orderDraft.shippingFee,
-                        totalAmount: orderDraft.totalAmount,
+                        subtotal,
+                        shippingFee,
+                        discountAmount,
+                        couponCode: cleanCouponCode,
+                        couponDiscount,
+                        pointsUsed,
+                        pointsDiscount,
+                        totalAmount,
                         paymentMethod: VNPAY_PROVIDER,
                         paymentStatus: 'UNPAID',
                         paymentInfo: { provider: VNPAY_PROVIDER },
@@ -353,10 +467,67 @@ export const verifyVnpayReturn = async (query = {}) => {
             };
 
             await order.save();
+
+            // Tien - Cập nhật trực tiếp trạng thái thanh toán khi nhận được URL Return đã verify thành công (dự phòng khi IPN không thể gọi đến do ngrok hoặc local)
+            if (result.isSuccess) {
+                const session = await mongoose.startSession();
+                try {
+                    await session.withTransaction(async () => {
+                        const lockedOrder = await Order.findOne({ _id: order._id }).session(session);
+                        if (lockedOrder && lockedOrder.paymentStatus === 'UNPAID' && lockedOrder.status === 'PENDING_PAYMENT') {
+                            await confirmPaidOrder(lockedOrder, verifyResult, session);
+                        }
+                    });
+                } catch (error) {
+                    console.error('[VNPAY Return fallback] Lỗi xác nhận đơn hàng:', error);
+                } finally {
+                    await session.endSession();
+                }
+            }
         }
     }
 
     return result;
+};
+
+// Tien - Thực hiện gọi API hoàn tiền (Refund) của VNPAY
+export const refundVnpayPayment = async ({ order, ipAddr, createdBy }) => {
+    try {
+        const vnpay = getVnpayClient();
+        const transactionNo = order.paymentInfo?.transactionNo;
+        const payDate = order.paymentInfo?.payDate;
+
+        if (!transactionNo || !payDate) {
+            console.warn(`[VNPAY Refund] Đơn hàng ${order.orderCode} thiếu thông tin transactionNo hoặc payDate để hoàn tiền tự động.`);
+            return { success: false, code: 'MISSING_TRANSACTION_INFO' };
+        }
+
+        const refundResult = await vnpay.refund({
+            vnp_TxnRef: order.orderCode,
+            vnp_Amount: order.totalAmount,
+            vnp_TransactionType: '02', // Hoàn tiền toàn phần
+            vnp_TransactionNo: Number(transactionNo),
+            vnp_TransactionDate: Number(payDate),
+            vnp_CreateBy: createdBy || 'Admin',
+            vnp_IpAddr: ipAddr || '127.0.0.1',
+            vnp_OrderInfo: `Hoan tra don hang ${order.orderCode} do huy don`,
+        });
+
+        console.log(`[VNPAY Refund] Kết quả hoàn tiền từ VNPay cho đơn ${order.orderCode}:`, refundResult);
+
+        if (refundResult?.vnp_ResponseCode === '00') {
+            return { success: true, data: refundResult };
+        } else {
+            return { 
+                success: false, 
+                code: refundResult?.vnp_ResponseCode, 
+                message: refundResult?.vnp_Message 
+            };
+        }
+    } catch (error) {
+        console.error(`[VNPAY Refund] Lỗi khi gọi API hoàn tiền cho đơn ${order.orderCode}:`, error);
+        return { success: false, error: error.message };
+    }
 };
 
 export { PaymentServiceError };

@@ -1,9 +1,12 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import Order from '../models/order.model.js';
-import { applyStockForOrderItems, buildOrderDraftFromCart, clearCart, mapOrder, normalizeText } from './checkout.helper.js';
+import { applyStockForOrderItems, buildOrderDraftFromCart, clearCart, mapOrder, normalizeText, refundOrderDiscounts } from './checkout.helper.js';
 import { createNotification } from '../utils/notification';
 import { recordDeliveredOrderRevenue } from './wallet.service';
+import User from '../models/user.js';
+import Voucher from '../models/voucher.model.js';
+import { refundVnpayPayment } from './payment.service.js';
 
 const DEFAULT_PAYMENT_METHOD = 'COD';
 const SUPPORTED_PAYMENT_METHODS = ['COD'];
@@ -541,7 +544,7 @@ export const getMyOrderDetail = async ({ userId, orderIdOrCode }) => {
     return mapOrder(order);
 };
 
-export const cancelMyOrder = async ({ userId, orderIdOrCode, reason }) => {
+export const cancelMyOrder = async ({ userId, orderIdOrCode, reason, ipAddr }) => {
     if (!mongoose.isValidObjectId(userId)) {
         throw createServiceError(400, 'Người dùng không hợp lệ', 'INVALID_OBJECT_ID');
     }
@@ -557,37 +560,79 @@ export const cancelMyOrder = async ({ userId, orderIdOrCode, reason }) => {
     }
 
     await autoConfirmExpiredNewOrders(userId);
-    const order = await Order.findOne(getOrderOwnershipFilter(userId, orderKey));
-    const decision = getCancelDecision(order);
+    const session = await mongoose.startSession();
+    let resultOrder = null;
 
-    if (decision.action === 'BLOCK') {
-        throw createServiceError(decision.statusCode, decision.message, decision.code);
-    }
+    try {
+        await session.withTransaction(async () => {
+            const order = await Order.findOne(getOrderOwnershipFilter(userId, orderKey)).session(session);
 
-    if (decision.action === 'CANCEL') {
-        order.status = 'CANCELLED';
-        if (order.paymentStatus === 'PAID') {
-            order.paymentStatus = 'REFUND_REQUIRED';
-        }
-        order.statusHistory.push({
-            status: 'CANCELLED',
-            note: cancelReason || 'Người dùng hủy đơn trong thời gian cho phép',
-            changedAt: new Date(),
+            if (!order) {
+                throw createServiceError(404, 'Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND');
+            }
+
+            const decision = getCancelDecision(order);
+
+            if (decision.action === 'BLOCK') {
+                throw createServiceError(decision.statusCode, decision.message, decision.code);
+            }
+
+            if (decision.action === 'CANCEL') {
+                order.status = 'CANCELLED';
+                if (order.paymentStatus === 'PAID') {
+                    order.paymentStatus = 'REFUND_REQUIRED';
+
+                    // Tien - Gọi API hoàn tiền tự động của VNPay
+                    if (order.paymentMethod === 'VNPAY') {
+                        const refundRes = await refundVnpayPayment({
+                            order,
+                            ipAddr,
+                            createdBy: String(userId),
+                        });
+
+                        if (refundRes.success) {
+                            order.paymentStatus = 'REFUNDED';
+                            order.statusHistory.push({
+                                status: 'CANCELLED',
+                                note: 'Hoàn tiền tự động qua VNPay thành công',
+                                changedAt: new Date(),
+                            });
+                        } else {
+                            order.statusHistory.push({
+                                status: 'CANCELLED',
+                                note: `Yêu cầu hoàn tiền tự động qua VNPay thất bại (${refundRes.code || 'ERROR'}). Cần hoàn tiền thủ công.`,
+                                changedAt: new Date(),
+                            });
+                        }
+                    }
+                }
+                order.statusHistory.push({
+                    status: 'CANCELLED',
+                    note: cancelReason || 'Người dùng hủy đơn trong thời gian cho phép',
+                    changedAt: new Date(),
+                });
+
+                // Tien - Hoàn trả điểm tích lũy và voucher khi hủy đơn
+                await refundOrderDiscounts({ order, userId, session });
+            }
+
+            if (decision.action === 'REQUEST_CANCEL') {
+                order.status = 'CANCEL_REQUESTED';
+                order.statusHistory.push({
+                    status: 'CANCEL_REQUESTED',
+                    note: cancelReason || 'Người dùng gửi yêu cầu hủy đơn cho shop',
+                    changedAt: new Date(),
+                });
+            }
+
+            await order.save({ session });
+            resultOrder = order;
         });
+
+        return mapOrder(resultOrder);
+    } finally {
+        session.endSession();
     }
-
-    if (decision.action === 'REQUEST_CANCEL') {
-        order.status = 'CANCEL_REQUESTED';
-        order.statusHistory.push({
-            status: 'CANCEL_REQUESTED',
-            note: cancelReason || 'Người dùng gửi yêu cầu hủy đơn cho shop',
-            changedAt: new Date(),
-        });
-    }
-
-    await order.save();
-
-    return mapOrder(order);
 };
 
 export const getAdminOrders = async ({ page, limit, status }) => {
@@ -717,7 +762,7 @@ export const updateAdminOrderStatus = async ({ orderIdOrCode, status, note }) =>
     return mapOrder(order);
 };
 
-export const resolveAdminCancelRequest = async ({ orderIdOrCode, action, note }) => {
+export const resolveAdminCancelRequest = async ({ orderIdOrCode, action, note, ipAddr, createdBy }) => {
     const orderKey = normalizeText(orderIdOrCode);
     if (!orderKey) {
         throw createServiceError(400, 'Mã đơn hàng không hợp lệ', 'INVALID_ORDER_KEY');
@@ -731,49 +776,86 @@ export const resolveAdminCancelRequest = async ({ orderIdOrCode, action, note })
     }
 
     const adminNote = validateAdminNote(note);
-    const order = await Order.findOne(getOrderFilter(orderKey));
+    const session = await mongoose.startSession();
+    let resultOrder = null;
 
-    if (!order) {
-        throw createServiceError(404, 'Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND');
-    }
+    try {
+        await session.withTransaction(async () => {
+            const order = await Order.findOne(getOrderFilter(orderKey)).session(session);
 
-    if (order.status !== 'CANCEL_REQUESTED') {
-        throw createServiceError(400, 'Đơn hàng không có yêu cầu hủy đang chờ xử lý', 'ORDER_NOT_CANCEL_REQUESTED');
-    }
+            if (!order) {
+                throw createServiceError(404, 'Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND');
+            }
 
-    if (normalizedAction === 'APPROVE') {
-        order.status = 'CANCELLED';
-        if (order.paymentStatus === 'PAID') {
-            order.paymentStatus = 'REFUND_REQUIRED';
-        }
-        order.statusHistory.push({
-            status: 'CANCELLED',
-            note: adminNote || 'Admin chấp nhận yêu cầu hủy đơn',
-            changedAt: new Date(),
+            if (order.status !== 'CANCEL_REQUESTED') {
+                throw createServiceError(400, 'Đơn hàng không có yêu cầu hủy đang chờ xử lý', 'ORDER_NOT_CANCEL_REQUESTED');
+            }
+
+            if (normalizedAction === 'APPROVE') {
+                order.status = 'CANCELLED';
+                if (order.paymentStatus === 'PAID') {
+                    order.paymentStatus = 'REFUND_REQUIRED';
+
+                    // Tien - Gọi API hoàn tiền tự động của VNPay
+                    if (order.paymentMethod === 'VNPAY') {
+                        const refundRes = await refundVnpayPayment({
+                            order,
+                            ipAddr,
+                            createdBy: createdBy || 'Admin',
+                        });
+
+                        if (refundRes.success) {
+                            order.paymentStatus = 'REFUNDED';
+                            order.statusHistory.push({
+                                status: 'CANCELLED',
+                                note: 'Hoàn tiền tự động qua VNPay thành công',
+                                changedAt: new Date(),
+                            });
+                        } else {
+                            order.statusHistory.push({
+                                status: 'CANCELLED',
+                                note: `Yêu cầu hoàn tiền tự động qua VNPay thất bại (${refundRes.code || 'ERROR'}). Cần hoàn tiền thủ công.`,
+                                changedAt: new Date(),
+                            });
+                        }
+                    }
+                }
+                order.statusHistory.push({
+                    status: 'CANCELLED',
+                    note: adminNote || 'Admin chấp nhận yêu cầu hủy đơn',
+                    changedAt: new Date(),
+                });
+
+                // Tien - Hoàn trả điểm tích lũy và voucher khi duyệt hủy đơn
+                await refundOrderDiscounts({ order, userId: order.user, session });
+            } else {
+                order.status = 'PREPARING';
+                order.statusHistory.push({
+                    status: 'PREPARING',
+                    note: adminNote || 'Admin từ chối yêu cầu hủy đơn, tiếp tục chuẩn bị hàng',
+                    changedAt: new Date(),
+                });
+            }
+
+            await order.save({ session });
+            resultOrder = order;
         });
-    } else {
-        order.status = 'PREPARING';
-        order.statusHistory.push({
-            status: 'PREPARING',
-            note: adminNote || 'Admin từ chối yêu cầu hủy đơn, tiếp tục chuẩn bị hàng',
-            changedAt: new Date(),
-        });
+
+        // Trigger Notification for the Customer (User)
+        const actionText = action === 'APPROVE' ? 'được chấp nhận' : 'bị từ chối';
+        const statusText = action === 'APPROVE' ? 'Đã hủy' : 'Đang chuẩn bị hàng';
+        createNotification({
+            recipientId: resultOrder.user,
+            type: 'ORDER_STATUS_UPDATE',
+            title: 'Yêu cầu hủy đơn hàng',
+            content: `Yêu cầu hủy đơn hàng ${resultOrder.orderCode} của bạn đã ${actionText}. Trạng thái hiện tại: ${statusText}. Ghi chú: ${adminNote || 'Không có'}`,
+            link: `/orders`
+        }).catch(err => console.error('Cancel request resolution notification error:', err));
+
+        return mapOrder(resultOrder);
+    } finally {
+        session.endSession();
     }
-
-    await order.save();
-
-    // Trigger Notification for the Customer (User)
-    const actionText = action === 'APPROVE' ? 'được chấp nhận' : 'bị từ chối';
-    const statusText = action === 'APPROVE' ? 'Đã hủy' : 'Đang chuẩn bị hàng';
-    createNotification({
-        recipientId: order.user,
-        type: 'ORDER_STATUS_UPDATE',
-        title: 'Yêu cầu hủy đơn hàng',
-        content: `Yêu cầu hủy đơn hàng ${order.orderCode} của bạn đã ${actionText}. Trạng thái hiện tại: ${statusText}. Ghi chú: ${adminNote || 'Không có'}`,
-        link: `/orders`
-    }).catch(err => console.error('Cancel request resolution notification error:', err));
-
-    return mapOrder(order);
 };
 
 export const createAdminDeliveryQr = async ({ orderIdOrCode }) => {
@@ -921,5 +1003,109 @@ export const verifyMyDeliveryQr = async ({ userId, qrContent }) => {
         notice: 'QR chỉ xác nhận kiện hàng được liên kết với đơn trên SmartZone. Hãy kiểm tra niêm phong và sản phẩm thực tế trước khi nhận.',
     };
 };
+
+// Tien - Tính toán trước số tiền giảm giá và tổng thanh toán khi checkout
+export const previewCheckout = async ({ userId, shippingInfo, couponCode, usePoints }) => {
+    const orderDraft = await buildOrderDraftFromCart({
+        userId,
+        shippingInfo,
+        createServiceError
+    });
+
+    const subtotal = orderDraft.subtotal;
+    const shippingFee = orderDraft.shippingFee;
+    let couponDiscount = 0;
+    let pointsDiscount = 0;
+    let pointsUsed = 0;
+    const now = new Date();
+
+    const cleanCouponCode = String(couponCode || '').trim().toUpperCase();
+    if (cleanCouponCode) {
+        const user = await User.findById(userId).lean();
+        const userCoupon = (user?.rewardCoupons || []).find(
+            c => c.code === cleanCouponCode && !c.isUsed && new Date(c.expiresAt) > now
+        );
+
+        if (userCoupon) {
+            if (subtotal < userCoupon.minOrderAmount) {
+                throw createServiceError(400, `Đơn hàng chưa đạt giá trị tối thiểu ${userCoupon.minOrderAmount.toLocaleString('vi-VN')}đ để dùng mã này`, 'MIN_ORDER_AMOUNT_NOT_MET');
+            }
+            couponDiscount = Math.round((subtotal * userCoupon.discountPercent) / 100);
+        } else {
+            const systemVoucher = await Voucher.findOne({
+                code: cleanCouponCode,
+                isActive: true,
+                startDate: { $lte: now },
+                endDate: { $gte: now }
+            });
+
+            if (!systemVoucher) {
+                throw createServiceError(400, 'Mã giảm giá không tồn tại hoặc đã hết hạn', 'VOUCHER_INVALID');
+            }
+
+            if (subtotal < systemVoucher.minOrderAmount) {
+                throw createServiceError(400, `Đơn hàng chưa đạt giá trị tối thiểu ${systemVoucher.minOrderAmount.toLocaleString('vi-VN')}đ để dùng mã này`, 'MIN_ORDER_AMOUNT_NOT_MET');
+            }
+
+            if (systemVoucher.usedCount >= systemVoucher.usageLimit) {
+                throw createServiceError(400, 'Mã giảm giá đã hết lượt sử dụng', 'VOUCHER_OUT_OF_STOCK');
+            }
+
+            const alreadyUsed = await Order.findOne({
+                user: userId,
+                couponCode: cleanCouponCode,
+                status: { $ne: 'CANCELLED' }
+            }).lean();
+
+            if (alreadyUsed) {
+                throw createServiceError(400, 'Bạn đã sử dụng mã giảm giá này cho đơn hàng khác rồi', 'VOUCHER_ALREADY_USED');
+            }
+
+            if (systemVoucher.discountType === 'PERCENT') {
+                couponDiscount = Math.round((subtotal * systemVoucher.discountValue) / 100);
+                if (systemVoucher.maxDiscountAmount > 0) {
+                    couponDiscount = Math.min(couponDiscount, systemVoucher.maxDiscountAmount);
+                }
+            } else if (systemVoucher.discountType === 'AMOUNT') {
+                couponDiscount = systemVoucher.discountValue;
+            }
+        }
+    }
+
+    if (usePoints) {
+        const user = await User.findById(userId).select('rewardPoints').lean();
+        const userPoints = user?.rewardPoints || 0;
+
+        if (userPoints > 0) {
+            const rate = 1000;
+            const remainingAmount = subtotal + shippingFee - couponDiscount;
+            const maxPointsDiscount = Math.max(0, remainingAmount);
+            const potentialPointsDiscount = userPoints * rate;
+
+            if (potentialPointsDiscount <= maxPointsDiscount) {
+                pointsDiscount = potentialPointsDiscount;
+                pointsUsed = userPoints;
+            } else {
+                pointsDiscount = maxPointsDiscount;
+                pointsUsed = Math.ceil(maxPointsDiscount / rate);
+            }
+        }
+    }
+
+    const discountAmount = couponDiscount + pointsDiscount;
+    const totalAmount = Math.max(0, subtotal + shippingFee - discountAmount);
+
+    return {
+        subtotal,
+        shippingFee,
+        discountAmount,
+        couponCode: cleanCouponCode,
+        couponDiscount,
+        pointsUsed,
+        pointsDiscount,
+        totalAmount
+    };
+};
+///////
 
 export { OrderServiceError };

@@ -8,6 +8,7 @@ import {
     getMyOrderDetail,
     getMyOrders,
     OrderServiceError,
+    previewCheckout,
     resolveAdminCancelRequest,
     updateAdminOrderStatus,
     verifyMyDeliveryQr,
@@ -51,6 +52,8 @@ export const checkoutOrderController = async (req, res) => {
     try {
         const userId = getUserIdFromRequest(req);
         const paymentMethod = normalizePaymentMethod(req.body?.paymentMethod);
+        const couponCode = req.body?.couponCode;
+        const usePoints = req.body?.usePoints;
 
         if (paymentMethod === 'VNPAY') {
             const payment = await createVnpayPaymentFromCart({
@@ -58,6 +61,8 @@ export const checkoutOrderController = async (req, res) => {
                 shippingInfo: req.body?.shippingInfo || req.body || {},
                 ipAddr: getClientIpFromRequest(req),
                 bankCode: req.body?.bankCode,
+                couponCode,
+                usePoints,
             });
 
             return sendSuccessResponse(res, {
@@ -71,6 +76,8 @@ export const checkoutOrderController = async (req, res) => {
             userId,
             shippingInfo: req.body?.shippingInfo || req.body || {},
             paymentMethod,
+            couponCode,
+            usePoints,
         });
 
         return sendSuccessResponse(res, {
@@ -140,6 +147,7 @@ export const cancelMyOrderController = async (req, res) => {
             userId,
             orderIdOrCode: req.params?.orderIdOrCode,
             reason: req.body?.reason,
+            ipAddr: getClientIpFromRequest(req),
         });
 
         return sendSuccessResponse(res, {
@@ -247,6 +255,8 @@ export const resolveAdminCancelRequestController = async (req, res) => {
             orderIdOrCode: req.params?.orderIdOrCode,
             action: req.body?.action,
             note: req.body?.note,
+            ipAddr: getClientIpFromRequest(req),
+            createdBy: req.user?.email || 'Admin',
         });
 
         return sendSuccessResponse(res, {
@@ -319,3 +329,28 @@ export const verifyMyDeliveryQrController = async (req, res) => {
         });
     }
 };
+
+// Tien - Controller xử lý yêu cầu tính toán thử tiền giảm giá trước khi đặt hàng
+export const previewCheckoutController = async (req, res) => {
+    try {
+        const userId = getUserIdFromRequest(req);
+        const result = await previewCheckout({
+            userId,
+            shippingInfo: req.body?.shippingInfo || req.body || {},
+            couponCode: req.body?.couponCode,
+            usePoints: req.body?.usePoints,
+        });
+
+        return sendSuccessResponse(res, {
+            message: 'Tính toán giảm giá và tổng thanh toán thành công',
+            data: result,
+        });
+    } catch (error) {
+        return sendErrorResponse(res, {
+            status: error instanceof OrderServiceError ? error.statusCode : 500,
+            message: error instanceof OrderServiceError ? error.message : 'Lỗi server khi tính toán giảm giá',
+            error,
+        });
+    }
+};
+///////

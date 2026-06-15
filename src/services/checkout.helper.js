@@ -1,6 +1,44 @@
 import mongoose from 'mongoose';
 import Cart from '../models/cart.model.js';
 import Product from '../models/product.model.js';
+import User from '../models/user.js';
+import Voucher from '../models/voucher.model.js';
+
+// Tien - Hoàn trả điểm tích lũy và voucher khi đơn hàng bị hủy
+export const refundOrderDiscounts = async ({ order, userId, session }) => {
+    if (order.pointsUsed && order.pointsUsed > 0) {
+        await User.updateOne(
+            { _id: userId },
+            { $inc: { rewardPoints: order.pointsUsed } },
+            { session }
+        );
+    }
+
+    if (order.couponCode) {
+        const cleanCouponCode = String(order.couponCode).trim().toUpperCase();
+        const user = await User.findById(userId).session(session);
+        if (user && Array.isArray(user.rewardCoupons)) {
+            const userCoupon = user.rewardCoupons.find(c => c.code === cleanCouponCode);
+            if (userCoupon) {
+                await User.updateOne(
+                    { _id: userId, 'rewardCoupons.code': cleanCouponCode },
+                    { 
+                        $set: { 'rewardCoupons.$.isUsed': false },
+                        $unset: { 'rewardCoupons.$.usedAt': '' } 
+                    },
+                    { session }
+                );
+                return;
+            }
+        }
+
+        const systemVoucher = await Voucher.findOne({ code: cleanCouponCode }).session(session);
+        if (systemVoucher) {
+            systemVoucher.usedCount = Math.max(0, systemVoucher.usedCount - 1);
+            await systemVoucher.save({ session });
+        }
+    }
+};
 
 export const SHIPPING_FEE = 0;
 

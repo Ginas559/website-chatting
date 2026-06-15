@@ -24,6 +24,7 @@ import {
     authorizeRoles 
 } from "../middleware/loginMiddleware";
 import userManagementController from "../controllers/userManagement.controller.js";
+import * as voucherController from "../controllers/voucher.controller.js";
 import { createUserValidator, updateUserValidator, deleteUserValidator, resetUserPasswordValidator } from "../middleware/userManagement.middleware.js";
 import { updateSettingsValidator } from "../middleware/setting.middleware.js";
 import initProductRoutes from "./product.route.js";
@@ -85,6 +86,14 @@ let initWebRoutes = (app) => {
     router.put('/admin/users/:id', authenticateToken, authorizeRoles('R1', 'R3'), updateUserValidator, userManagementController.updateUser);
     router.patch('/admin/users/:id/reset-password', authenticateToken, authorizeRoles('R1', 'R3'), resetUserPasswordValidator, userManagementController.resetUserPassword);
     router.delete('/admin/users/:id', authenticateToken, authorizeRoles('R1', 'R3'), deleteUserValidator, userManagementController.deleteUser);
+
+    router.post('/api/admin/vouchers', authenticateToken, authorizeRoles('R1', 'R3'), voucherController.createVoucherController);
+    router.get('/api/admin/vouchers', authenticateToken, authorizeRoles('R1', 'R3'), voucherController.getVouchersAdminController);
+    router.get('/api/admin/vouchers/:id', authenticateToken, authorizeRoles('R1', 'R3'), voucherController.getVoucherByIdController);
+    router.put('/api/admin/vouchers/:id', authenticateToken, authorizeRoles('R1', 'R3'), voucherController.updateVoucherController);
+    router.delete('/api/admin/vouchers/:id', authenticateToken, authorizeRoles('R1', 'R3'), voucherController.deleteVoucherController);
+
+    router.get('/api/vouchers/my', authenticateToken, authorizeUser, voucherController.getAvailableVouchersController);
 
     return app.use("/", router);
 }
