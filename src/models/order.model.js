@@ -135,13 +135,43 @@ const orderSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ['PENDING_PAYMENT', 'NEW', 'CONFIRMED', 'PREPARING', 'SHIPPING', 'DELIVERED', 'CANCELLED', 'CANCEL_REQUESTED'],
+            enum: ['PENDING_PAYMENT', 'NEW', 'CONFIRMED', 'PREPARING', 'SHIPPING', 'DELIVERED', 'DELIVERY_FAILED', 'CANCELLED', 'CANCEL_REQUESTED'],
             default: 'NEW',
             required: true,
         },
         statusHistory: {
             type: [statusHistorySchema],
             default: () => [{ status: 'NEW', note: 'Đơn hàng mới được tạo', changedAt: new Date() }],
+        },
+        riskScore: {
+            type: Number,
+            default: 0,
+            min: 0,
+            max: 100,
+        },
+        riskLevel: {
+            type: String,
+            enum: ['LOW', 'MEDIUM', 'HIGH'],
+            default: 'LOW',
+        },
+        riskReasons: {
+            type: [String],
+            default: [],
+        },
+        isSuspicious: {
+            type: Boolean,
+            default: false,
+        },
+        fraudProbability: {
+            type: Number,
+            default: 0,
+            min: 0,
+            max: 1,
+        },
+        riskSource: {
+            type: String,
+            enum: ['AI_MODEL', 'FALLBACK_RULE', 'FALLBACK_DEFAULT'],
+            default: 'FALLBACK_DEFAULT',
         },
         deliveryVerification: {
             type: deliveryVerificationSchema,
@@ -155,6 +185,8 @@ const orderSchema = new mongoose.Schema(
 
 orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
+orderSchema.index({ riskLevel: 1, createdAt: -1 });
+orderSchema.index({ isSuspicious: 1, createdAt: -1 });
 orderSchema.index({ 'deliveryVerification.tokenHash': 1 }, { sparse: true });
 
 const Order = mongoose.model('Order', orderSchema);

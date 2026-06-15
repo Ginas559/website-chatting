@@ -1,9 +1,11 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import Order from '../models/order.model.js';
+import User from '../models/user';
 import { applyStockForOrderItems, buildOrderDraftFromCart, clearCart, mapOrder, normalizeText } from './checkout.helper.js';
 import { createNotification } from '../utils/notification';
 import { recordDeliveredOrderRevenue } from './wallet.service';
+import { layKetQuaRuiRoAnToan } from './orderRisk.service';
 
 const DEFAULT_PAYMENT_METHOD = 'COD';
 const SUPPORTED_PAYMENT_METHODS = ['COD'];
@@ -204,21 +206,26 @@ const getOrderFilter = (orderIdOrCode) => {
 const MINUTES_TO_CANCEL_NEW_ORDER = 30;
 const CANCELLABLE_NEW_STATUSES = ['NEW'];
 const REQUEST_CANCEL_STATUSES = ['PREPARING'];
-const FINAL_STATUSES = ['CANCELLED', 'DELIVERED'];
+const FINAL_STATUSES = ['CANCELLED', 'DELIVERED', 'DELIVERY_FAILED'];
 const AUTO_CONFIRM_AFTER_MINUTES = 30;
-const ADMIN_NEXT_STATUSES = {
-    NEW: 'CONFIRMED',
-    CONFIRMED: 'PREPARING',
-    PREPARING: 'SHIPPING',
-    SHIPPING: 'DELIVERED',
+const ADMIN_ALLOWED_TRANSITIONS = {
+    NEW: ['CONFIRMED'],
+    CONFIRMED: ['PREPARING'],
+    PREPARING: ['SHIPPING'],
+    SHIPPING: ['DELIVERED', 'DELIVERY_FAILED'],
+    DELIVERED: [],
+    DELIVERY_FAILED: [],
+    CANCELLED: [],
+    CANCEL_REQUESTED: [],
 };
 const ADMIN_STATUS_NOTES = {
     CONFIRMED: 'Shop đã xác nhận đơn hàng của bạn',
     PREPARING: 'Shop đang chuẩn bị hàng cho đơn hàng của bạn',
     SHIPPING: 'Đơn hàng đã được bàn giao cho đơn vị vận chuyển',
     DELIVERED: 'Đơn hàng đã được giao thành công',
+    DELIVERY_FAILED: 'Đơn hàng giao thất bại',
 };
-const USER_ACTIVITY_STATUSES = ['CANCELLED', 'CANCEL_REQUESTED'];
+const USER_ACTIVITY_STATUSES = ['CANCELLED', 'CANCEL_REQUESTED', 'DELIVERY_FAILED'];
 const USER_HISTORY_STATUS_PRIORITY = {
     CANCEL_REQUESTED: 0,
     NEW: 1,
@@ -228,6 +235,7 @@ const USER_HISTORY_STATUS_PRIORITY = {
     PENDING_PAYMENT: 5,
     SHIPPING: 6,
     DELIVERED: 7,
+    DELIVERY_FAILED: 8,
 };
 
 const getMinutesSince = (date) => {
@@ -359,6 +367,63 @@ const validateOrderStatus = (status) => {
     return normalizedStatus;
 };
 
+const validateRiskLevel = (riskLevel) => {
+    const normalizedRiskLevel = normalizeText(riskLevel).toUpperCase();
+
+    if (!normalizedRiskLevel) {
+        return '';
+    }
+
+    if (!['LOW', 'MEDIUM', 'HIGH'].includes(normalizedRiskLevel)) {
+        throw createServiceError(400, 'Mức rủi ro không hợp lệ', 'INVALID_RISK_LEVEL', {
+            riskLevel: normalizedRiskLevel,
+            validRiskLevels: ['LOW', 'MEDIUM', 'HIGH'],
+        });
+    }
+
+    return normalizedRiskLevel;
+};
+
+const validateAdminStatusTransition = (currentStatus, nextStatus) => {
+    const allowedNextStatuses = ADMIN_ALLOWED_TRANSITIONS[currentStatus] || [];
+
+    if (allowedNextStatuses.includes(nextStatus)) {
+        return;
+    }
+
+    if (nextStatus === 'DELIVERY_FAILED') {
+        throw createServiceError(400, 'Chỉ đơn đang giao mới có thể đánh dấu giao thất bại', 'DELIVERY_FAILED_ONLY_FROM_SHIPPING', {
+            currentStatus,
+            allowedNextStatuses,
+            requestedStatus: nextStatus,
+        });
+    }
+
+    throw createServiceError(400, 'Chỉ được chuyển đơn hàng sang bước kế tiếp', 'INVALID_ORDER_TRANSITION', {
+        currentStatus,
+        allowedNextStatuses,
+        requestedStatus: nextStatus,
+    });
+};
+
+const escapeRegExp = (value) => normalizeText(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const mapAdminOrder = (order) => {
+    const mappedOrder = mapOrder(order);
+    const user = order?.user || {};
+    const customerName = `${user.firstName || ''} ${user.lastName || ''}`.trim()
+        || user.email
+        || order?.shippingInfo?.fullName
+        || '-';
+
+    return {
+        ...mappedOrder,
+        _id: order._id,
+        userId: order.user,
+        customerName,
+    };
+};
+
 const validateAdminNote = (note) => {
     const normalizedNote = normalizeText(note);
 
@@ -369,7 +434,7 @@ const validateAdminNote = (note) => {
     return normalizedNote;
 };
 
-export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod }) => {
+export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shippingDistanceKm }) => {
     const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
     const session = await mongoose.startSession();
 
@@ -382,6 +447,11 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod }) => 
                 shippingInfo,
                 session,
                 createServiceError,
+            });
+            const ketQuaRuiRo = await layKetQuaRuiRoAnToan({
+                userId,
+                orderAmount: orderDraft.totalAmount,
+                shippingDistanceKm,
             });
 
             await applyStockForOrderItems(orderDraft.orderItems, session, createServiceError);
@@ -400,6 +470,12 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod }) => 
                         paymentStatus: 'UNPAID',
                         status: 'NEW',
                         statusHistory: [{ status: 'NEW', note: `Đơn hàng ${normalizedPaymentMethod} mới được tạo`, changedAt: new Date() }],
+                        riskScore: ketQuaRuiRo.riskScore,
+                        riskLevel: ketQuaRuiRo.riskLevel,
+                        riskReasons: ketQuaRuiRo.riskReasons,
+                        isSuspicious: ketQuaRuiRo.isSuspicious,
+                        fraudProbability: ketQuaRuiRo.fraudProbability,
+                        riskSource: ketQuaRuiRo.riskSource,
                     },
                 ],
                 { session }
@@ -590,15 +666,58 @@ export const cancelMyOrder = async ({ userId, orderIdOrCode, reason }) => {
     return mapOrder(order);
 };
 
-export const getAdminOrders = async ({ page, limit, status }) => {
+export const getAdminOrders = async ({ page, limit, status, keyword, riskLevel, isSuspicious }) => {
     const paging = normalizePagination({ page, limit });
     const filter = {};
+    const andConditions = [];
     const normalizedStatus = validateOrderStatus(status);
+    const normalizedRiskLevel = validateRiskLevel(riskLevel);
+    const normalizedKeyword = escapeRegExp(keyword);
 
     await autoConfirmExpiredNewOrders();
 
     if (normalizedStatus) {
         filter.status = normalizedStatus;
+    }
+
+    if (normalizedRiskLevel === 'LOW') {
+        andConditions.push({
+            $or: [
+                { riskLevel: 'LOW' },
+                { riskLevel: { $exists: false } },
+                { riskLevel: null },
+            ],
+        });
+    } else if (normalizedRiskLevel) {
+        filter.riskLevel = normalizedRiskLevel;
+    }
+
+    if (String(isSuspicious).toLowerCase() === 'true') {
+        filter.isSuspicious = true;
+    }
+
+    if (normalizedKeyword) {
+        const matchedUsers = await User.find({
+            $or: [
+                { firstName: { $regex: normalizedKeyword, $options: 'i' } },
+                { lastName: { $regex: normalizedKeyword, $options: 'i' } },
+                { email: { $regex: normalizedKeyword, $options: 'i' } },
+                { phoneNumber: { $regex: normalizedKeyword, $options: 'i' } },
+            ],
+        }).select('_id').lean();
+
+        andConditions.push({
+            $or: [
+                { orderCode: { $regex: normalizedKeyword, $options: 'i' } },
+                { 'shippingInfo.fullName': { $regex: normalizedKeyword, $options: 'i' } },
+                { 'shippingInfo.phone': { $regex: normalizedKeyword, $options: 'i' } },
+                { user: { $in: matchedUsers.map((item) => item._id) } },
+            ],
+        });
+    }
+
+    if (andConditions.length) {
+        filter.$and = andConditions;
     }
 
     const [orders, total] = await Promise.all([
@@ -612,7 +731,7 @@ export const getAdminOrders = async ({ page, limit, status }) => {
     ]);
 
     return {
-        items: orders.map(mapOrder),
+        items: orders.map(mapAdminOrder),
         pagination: {
             page: paging.page,
             limit: paging.limit,
@@ -672,14 +791,7 @@ export const updateAdminOrderStatus = async ({ orderIdOrCode, status, note }) =>
         throw createServiceError(400, 'Đơn hàng đang chờ xử lý yêu cầu hủy', 'CANCEL_REQUEST_PENDING');
     }
 
-    const expectedStatus = ADMIN_NEXT_STATUSES[order.status];
-    if (nextStatus !== expectedStatus) {
-        throw createServiceError(400, 'Chỉ được chuyển đơn hàng sang bước kế tiếp', 'INVALID_ORDER_TRANSITION', {
-            currentStatus: order.status,
-            allowedNextStatus: expectedStatus || null,
-            requestedStatus: nextStatus,
-        });
-    }
+    validateAdminStatusTransition(order.status, nextStatus);
 
     order.status = nextStatus;
     if (order.paymentMethod === 'COD' && nextStatus === 'DELIVERED') {
