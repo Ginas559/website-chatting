@@ -246,6 +246,12 @@ export const mapOrder = (order) => {
         paymentInfo: order.paymentInfo,
         status: order.status,
         statusHistory: order.statusHistory,
+        riskScore: Number(order.riskScore || 0),
+        riskLevel: order.riskLevel || 'LOW',
+        riskReasons: Array.isArray(order.riskReasons) ? order.riskReasons : [],
+        isSuspicious: Boolean(order.isSuspicious),
+        fraudProbability: Number(order.fraudProbability || 0),
+        riskSource: order.riskSource || 'FALLBACK_DEFAULT',
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
     };
