@@ -135,7 +135,7 @@ const orderSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ['PENDING_PAYMENT', 'NEW', 'CONFIRMED', 'PREPARING', 'SHIPPING', 'DELIVERED', 'CANCELLED', 'CANCEL_REQUESTED'],
+            enum: ['PENDING_PAYMENT', 'NEW', 'CONFIRMED', 'PREPARING', 'SHIPPING', 'DELIVERED', 'DELIVERY_FAILED', 'CANCELLED', 'CANCEL_REQUESTED'],
             default: 'NEW',
             required: true,
         },
@@ -161,6 +161,17 @@ const orderSchema = new mongoose.Schema(
         isSuspicious: {
             type: Boolean,
             default: false,
+        },
+        fraudProbability: {
+            type: Number,
+            default: 0,
+            min: 0,
+            max: 1,
+        },
+        riskSource: {
+            type: String,
+            enum: ['AI_MODEL', 'FALLBACK_RULE', 'FALLBACK_DEFAULT'],
+            default: 'FALLBACK_DEFAULT',
         },
         deliveryVerification: {
             type: deliveryVerificationSchema,

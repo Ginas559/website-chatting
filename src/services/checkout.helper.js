@@ -212,6 +212,8 @@ export const mapOrder = (order) => {
         riskLevel: order.riskLevel || 'LOW',
         riskReasons: Array.isArray(order.riskReasons) ? order.riskReasons : [],
         isSuspicious: Boolean(order.isSuspicious),
+        fraudProbability: Number(order.fraudProbability || 0),
+        riskSource: order.riskSource || 'FALLBACK_DEFAULT',
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
     };

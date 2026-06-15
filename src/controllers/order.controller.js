@@ -71,6 +71,7 @@ export const checkoutOrderController = async (req, res) => {
             userId,
             shippingInfo: req.body?.shippingInfo || req.body || {},
             paymentMethod,
+            shippingDistanceKm: req.body?.shippingDistanceKm ?? req.body?.shippingInfo?.shippingDistanceKm,
         });
 
         return sendSuccessResponse(res, {
