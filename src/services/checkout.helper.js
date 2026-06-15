@@ -208,6 +208,10 @@ export const mapOrder = (order) => {
         paymentInfo: order.paymentInfo,
         status: order.status,
         statusHistory: order.statusHistory,
+        riskScore: Number(order.riskScore || 0),
+        riskLevel: order.riskLevel || 'LOW',
+        riskReasons: Array.isArray(order.riskReasons) ? order.riskReasons : [],
+        isSuspicious: Boolean(order.isSuspicious),
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
     };

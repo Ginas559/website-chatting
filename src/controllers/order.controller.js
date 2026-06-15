@@ -186,6 +186,9 @@ export const getAdminOrdersController = async (req, res) => {
             page: req.query?.page,
             limit: req.query?.limit,
             status: req.query?.status,
+            keyword: req.query?.keyword,
+            riskLevel: req.query?.riskLevel,
+            isSuspicious: req.query?.isSuspicious,
         });
 
         return sendSuccessResponse(res, {

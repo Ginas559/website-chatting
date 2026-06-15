@@ -1,9 +1,11 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import Order from '../models/order.model.js';
+import User from '../models/user';
 import { applyStockForOrderItems, buildOrderDraftFromCart, clearCart, mapOrder, normalizeText } from './checkout.helper.js';
 import { createNotification } from '../utils/notification';
 import { recordDeliveredOrderRevenue } from './wallet.service';
+import { layKetQuaRuiRoAnToan } from './orderRisk.service';
 
 const DEFAULT_PAYMENT_METHOD = 'COD';
 const SUPPORTED_PAYMENT_METHODS = ['COD'];
@@ -359,6 +361,41 @@ const validateOrderStatus = (status) => {
     return normalizedStatus;
 };
 
+const validateRiskLevel = (riskLevel) => {
+    const normalizedRiskLevel = normalizeText(riskLevel).toUpperCase();
+
+    if (!normalizedRiskLevel) {
+        return '';
+    }
+
+    if (!['LOW', 'MEDIUM', 'HIGH'].includes(normalizedRiskLevel)) {
+        throw createServiceError(400, 'Mức rủi ro không hợp lệ', 'INVALID_RISK_LEVEL', {
+            riskLevel: normalizedRiskLevel,
+            validRiskLevels: ['LOW', 'MEDIUM', 'HIGH'],
+        });
+    }
+
+    return normalizedRiskLevel;
+};
+
+const escapeRegExp = (value) => normalizeText(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const mapAdminOrder = (order) => {
+    const mappedOrder = mapOrder(order);
+    const user = order?.user || {};
+    const customerName = `${user.firstName || ''} ${user.lastName || ''}`.trim()
+        || user.email
+        || order?.shippingInfo?.fullName
+        || '-';
+
+    return {
+        ...mappedOrder,
+        _id: order._id,
+        userId: order.user,
+        customerName,
+    };
+};
+
 const validateAdminNote = (note) => {
     const normalizedNote = normalizeText(note);
 
@@ -383,6 +420,10 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod }) => 
                 session,
                 createServiceError,
             });
+            const ketQuaRuiRo = await layKetQuaRuiRoAnToan({
+                userId,
+                orderAmount: orderDraft.totalAmount,
+            });
 
             await applyStockForOrderItems(orderDraft.orderItems, session, createServiceError);
 
@@ -400,6 +441,10 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod }) => 
                         paymentStatus: 'UNPAID',
                         status: 'NEW',
                         statusHistory: [{ status: 'NEW', note: `Đơn hàng ${normalizedPaymentMethod} mới được tạo`, changedAt: new Date() }],
+                        riskScore: ketQuaRuiRo.riskScore,
+                        riskLevel: ketQuaRuiRo.riskLevel,
+                        riskReasons: ketQuaRuiRo.riskReasons,
+                        isSuspicious: ketQuaRuiRo.isSuspicious,
                     },
                 ],
                 { session }
@@ -590,15 +635,58 @@ export const cancelMyOrder = async ({ userId, orderIdOrCode, reason }) => {
     return mapOrder(order);
 };
 
-export const getAdminOrders = async ({ page, limit, status }) => {
+export const getAdminOrders = async ({ page, limit, status, keyword, riskLevel, isSuspicious }) => {
     const paging = normalizePagination({ page, limit });
     const filter = {};
+    const andConditions = [];
     const normalizedStatus = validateOrderStatus(status);
+    const normalizedRiskLevel = validateRiskLevel(riskLevel);
+    const normalizedKeyword = escapeRegExp(keyword);
 
     await autoConfirmExpiredNewOrders();
 
     if (normalizedStatus) {
         filter.status = normalizedStatus;
+    }
+
+    if (normalizedRiskLevel === 'LOW') {
+        andConditions.push({
+            $or: [
+                { riskLevel: 'LOW' },
+                { riskLevel: { $exists: false } },
+                { riskLevel: null },
+            ],
+        });
+    } else if (normalizedRiskLevel) {
+        filter.riskLevel = normalizedRiskLevel;
+    }
+
+    if (String(isSuspicious).toLowerCase() === 'true') {
+        filter.isSuspicious = true;
+    }
+
+    if (normalizedKeyword) {
+        const matchedUsers = await User.find({
+            $or: [
+                { firstName: { $regex: normalizedKeyword, $options: 'i' } },
+                { lastName: { $regex: normalizedKeyword, $options: 'i' } },
+                { email: { $regex: normalizedKeyword, $options: 'i' } },
+                { phoneNumber: { $regex: normalizedKeyword, $options: 'i' } },
+            ],
+        }).select('_id').lean();
+
+        andConditions.push({
+            $or: [
+                { orderCode: { $regex: normalizedKeyword, $options: 'i' } },
+                { 'shippingInfo.fullName': { $regex: normalizedKeyword, $options: 'i' } },
+                { 'shippingInfo.phone': { $regex: normalizedKeyword, $options: 'i' } },
+                { user: { $in: matchedUsers.map((item) => item._id) } },
+            ],
+        });
+    }
+
+    if (andConditions.length) {
+        filter.$and = andConditions;
     }
 
     const [orders, total] = await Promise.all([
@@ -612,7 +700,7 @@ export const getAdminOrders = async ({ page, limit, status }) => {
     ]);
 
     return {
-        items: orders.map(mapOrder),
+        items: orders.map(mapAdminOrder),
         pagination: {
             page: paging.page,
             limit: paging.limit,
