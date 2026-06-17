@@ -1,5 +1,6 @@
 import { Server } from 'socket.io';
 import { registerLivestreamSocket } from '../sockets/livestream.socket';
+import { registerChatSocket } from '../sockets/chat.socket';
 
 let io = null;
 
@@ -21,6 +22,7 @@ export const initSocket = (server) => {
     io.on('connection', (socket) => {
         console.log(`[Socket] Client connected: ${socket.id}`);
         registerLivestreamSocket(io, socket);
+        registerChatSocket(io, socket);
 
         socket.on('join', (data) => {
             if (data?.userId) {

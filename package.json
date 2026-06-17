@@ -6,6 +6,7 @@
   "scripts": {
     "test": "mocha --require @babel/register test/**/*.test.js --timeout 10000 --exit",
     "test:delivery-qr": "babel-node scripts/deliveryVerification.smoke.js",
+    "test:chat": "babel-node scripts/chatVerification.smoke.js",
     "migrate:delivery-qr": "babel-node scripts/migrateLegacyDeliveryQr.js",
     "start": "nodemon --exec babel-node src/server.js"
   },
