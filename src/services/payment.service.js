@@ -175,7 +175,7 @@ const confirmPaidOrder = async (order, verifyResult, session) => {
         type: 'NEW_ORDER',
         title: 'Đơn hàng mới (VNPay)',
         content: `Đơn hàng ${order.orderCode} trị giá ${Number(order.totalAmount).toLocaleString('vi-VN')}đ đã được thanh toán qua VNPay thành công.`,
-        link: `/admin/orders`
+        link: `/admin/orders?code=${order.orderCode}`
     }).catch(err => console.error('VNPay checkout notification error:', err));
 };
 
@@ -195,7 +195,7 @@ const buildVnpayPaymentUrl = ({ order, ipAddr, bankCode }) => {
     });
 };
 
-export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr, bankCode, couponCode, usePoints }) => {
+export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr, bankCode, couponCode, usePoints, itemIds }) => {
     const session = await mongoose.startSession();
 
     try {
@@ -205,6 +205,7 @@ export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr,
             const orderDraft = await buildOrderDraftFromCart({
                 userId,
                 shippingInfo,
+                itemIds,
                 session,
                 createServiceError,
             });

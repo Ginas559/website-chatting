@@ -155,7 +155,7 @@ const getProductsByCartItems = async (items, session) => {
     }));
 };
 
-export const buildOrderDraftFromCart = async ({ userId, shippingInfo, session, createServiceError }) => {
+export const buildOrderDraftFromCart = async ({ userId, shippingInfo, itemIds, session, createServiceError }) => {
     ensureObjectId(userId, 'Người dùng', createServiceError);
     const normalizedShippingInfo = normalizeShippingInfo(shippingInfo, createServiceError);
     const cart = await Cart.findOne({ user: userId }).session(session);
@@ -164,7 +164,17 @@ export const buildOrderDraftFromCart = async ({ userId, shippingInfo, session, c
         throw createServiceError(400, 'Giỏ hàng đang trống, không thể thanh toán', 'EMPTY_CART');
     }
 
-    const entries = await getProductsByCartItems(cart.items, session);
+    let cartItems = cart.items;
+    if (Array.isArray(itemIds) && itemIds.length > 0) {
+        const selectedIdsSet = new Set(itemIds.map(id => String(id)));
+        cartItems = cart.items.filter(item => selectedIdsSet.has(String(item.product)));
+    }
+
+    if (cartItems.length === 0) {
+        throw createServiceError(400, 'Không có sản phẩm nào được chọn để thanh toán', 'EMPTY_CHECKOUT_ITEMS');
+    }
+
+    const entries = await getProductsByCartItems(cartItems, session);
     entries.forEach(({ cartItem, product }) => assertProductCanCheckout(cartItem, product, createServiceError));
 
     const orderItems = entries.map(({ cartItem, product }) => mapOrderItem(cartItem, product));
@@ -240,6 +250,11 @@ export const mapOrder = (order) => {
         shippingInfo: order.shippingInfo,
         subtotal: order.subtotal,
         shippingFee: order.shippingFee,
+        discountAmount: order.discountAmount || 0,
+        couponCode: order.couponCode || '',
+        couponDiscount: order.couponDiscount || 0,
+        pointsUsed: order.pointsUsed || 0,
+        pointsDiscount: order.pointsDiscount || 0,
         totalAmount: order.totalAmount,
         paymentMethod: order.paymentMethod,
         paymentStatus: order.paymentStatus,

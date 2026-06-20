@@ -207,7 +207,7 @@ const getOrderFilter = (orderIdOrCode) => {
 
 const MINUTES_TO_CANCEL_NEW_ORDER = 30;
 const CANCELLABLE_NEW_STATUSES = ['NEW'];
-const REQUEST_CANCEL_STATUSES = ['PREPARING'];
+const REQUEST_CANCEL_STATUSES = ['CONFIRMED', 'PREPARING'];
 const FINAL_STATUSES = ['CANCELLED', 'DELIVERED', 'DELIVERY_FAILED'];
 const AUTO_CONFIRM_AFTER_MINUTES = 30;
 const ADMIN_ALLOWED_TRANSITIONS = {
@@ -293,6 +293,10 @@ const getCancelDecision = (order) => {
             code: 'ORDER_ALREADY_FINALIZED',
             statusCode: 400,
         };
+    }
+
+    if (order.status === 'PENDING_PAYMENT') {
+        return { action: 'CANCEL' };
     }
 
     if (CANCELLABLE_NEW_STATUSES.includes(order.status)) {
@@ -436,7 +440,7 @@ const validateAdminNote = (note) => {
     return normalizedNote;
 };
 
-export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shippingDistanceKm }) => {
+export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shippingDistanceKm, couponCode, usePoints, itemIds }) => {
     const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
     const session = await mongoose.startSession();
 
@@ -447,12 +451,114 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
             const orderDraft = await buildOrderDraftFromCart({
                 userId,
                 shippingInfo,
+                itemIds,
                 session,
                 createServiceError,
             });
+
+            const subtotal = orderDraft.subtotal;
+            const shippingFee = orderDraft.shippingFee;
+            let couponDiscount = 0;
+            let pointsDiscount = 0;
+            let pointsUsed = 0;
+            const now = new Date();
+
+            // Tien - Kiểm tra và áp dụng mã giảm giá cho COD
+            const cleanCouponCode = String(couponCode || '').trim().toUpperCase();
+            if (cleanCouponCode) {
+                const user = await User.findById(userId).session(session);
+                const userCoupon = (user?.rewardCoupons || []).find(
+                    c => c.code === cleanCouponCode && !c.isUsed && new Date(c.expiresAt) > now
+                );
+
+                if (userCoupon) {
+                    if (subtotal < userCoupon.minOrderAmount) {
+                        throw createServiceError(400, `Đơn hàng chưa đạt giá trị tối thiểu ${userCoupon.minOrderAmount.toLocaleString('vi-VN')}đ để dùng mã này`, 'MIN_ORDER_AMOUNT_NOT_MET');
+                    }
+                    couponDiscount = Math.round((subtotal * userCoupon.discountPercent) / 100);
+
+                    await User.updateOne(
+                        { _id: userId, 'rewardCoupons.code': cleanCouponCode },
+                        { $set: { 'rewardCoupons.$.isUsed': true, 'rewardCoupons.$.usedAt': now } },
+                        { session }
+                    );
+                } else {
+                    const systemVoucher = await Voucher.findOne({
+                        code: cleanCouponCode,
+                        isActive: true,
+                        startDate: { $lte: now },
+                        endDate: { $gte: now }
+                    }).session(session);
+
+                    if (!systemVoucher) {
+                        throw createServiceError(400, 'Mã giảm giá không tồn tại hoặc đã hết hạn', 'VOUCHER_INVALID');
+                    }
+
+                    if (subtotal < systemVoucher.minOrderAmount) {
+                        throw createServiceError(400, `Đơn hàng chưa đạt giá trị tối thiểu ${systemVoucher.minOrderAmount.toLocaleString('vi-VN')}đ để dùng mã này`, 'MIN_ORDER_AMOUNT_NOT_MET');
+                    }
+
+                    if (systemVoucher.usedCount >= systemVoucher.usageLimit) {
+                        throw createServiceError(400, 'Mã giảm giá đã hết lượt sử dụng', 'VOUCHER_OUT_OF_STOCK');
+                    }
+
+                    const alreadyUsed = await Order.findOne({
+                        user: userId,
+                        couponCode: cleanCouponCode,
+                        status: { $ne: 'CANCELLED' }
+                    }).session(session).lean();
+
+                    if (alreadyUsed) {
+                        throw createServiceError(400, 'Bạn đã sử dụng mã giảm giá này cho đơn hàng khác rồi', 'VOUCHER_ALREADY_USED');
+                    }
+
+                    if (systemVoucher.discountType === 'PERCENT') {
+                        couponDiscount = Math.round((subtotal * systemVoucher.discountValue) / 100);
+                        if (systemVoucher.maxDiscountAmount > 0) {
+                            couponDiscount = Math.min(couponDiscount, systemVoucher.maxDiscountAmount);
+                        }
+                    } else if (systemVoucher.discountType === 'AMOUNT') {
+                        couponDiscount = systemVoucher.discountValue;
+                    }
+
+                    systemVoucher.usedCount += 1;
+                    await systemVoucher.save({ session });
+                }
+            }
+
+            // Tien - Kiểm tra và áp dụng điểm tích lũy cho COD
+            if (usePoints) {
+                const user = await User.findById(userId).session(session);
+                const userPoints = user?.rewardPoints || 0;
+
+                if (userPoints > 0) {
+                    const rate = 1000;
+                    const remainingAmount = subtotal + shippingFee - couponDiscount;
+                    const maxPointsDiscount = Math.max(0, remainingAmount);
+                    const potentialPointsDiscount = userPoints * rate;
+
+                    if (potentialPointsDiscount <= maxPointsDiscount) {
+                        pointsDiscount = potentialPointsDiscount;
+                        pointsUsed = userPoints;
+                    } else {
+                        pointsDiscount = maxPointsDiscount;
+                        pointsUsed = Math.ceil(maxPointsDiscount / rate);
+                    }
+
+                    await User.updateOne(
+                        { _id: userId },
+                        { $inc: { rewardPoints: -pointsUsed } },
+                        { session }
+                    );
+                }
+            }
+
+            const discountAmount = couponDiscount + pointsDiscount;
+            const totalAmount = Math.max(0, subtotal + shippingFee - discountAmount);
+
             const ketQuaRuiRo = await layKetQuaRuiRoAnToan({
                 userId,
-                orderAmount: orderDraft.totalAmount,
+                orderAmount: totalAmount,
                 shippingDistanceKm,
             });
 
@@ -465,9 +571,14 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
                         user: userId,
                         items: orderDraft.orderItems,
                         shippingInfo: orderDraft.shippingInfo,
-                        subtotal: orderDraft.subtotal,
-                        shippingFee: orderDraft.shippingFee,
-                        totalAmount: orderDraft.totalAmount,
+                        subtotal,
+                        shippingFee,
+                        discountAmount,
+                        couponCode: cleanCouponCode,
+                        couponDiscount,
+                        pointsUsed,
+                        pointsDiscount,
+                        totalAmount,
                         paymentMethod: normalizedPaymentMethod,
                         paymentStatus: 'UNPAID',
                         status: 'NEW',
@@ -483,7 +594,7 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
                 { session }
             );
 
-            await clearCart(orderDraft.cart, session);
+            await clearOrderedItemsFromCart(userId, orderDraft.orderItems, session);
             createdOrder = order;
         });
 
@@ -493,7 +604,7 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
             type: 'NEW_ORDER',
             title: 'Đơn hàng mới',
             content: `Khách hàng đã đặt đơn hàng ${createdOrder.orderCode} trị giá ${Number(createdOrder.totalAmount).toLocaleString('vi-VN')}đ.`,
-            link: `/admin/orders`
+            link: `/admin/orders?code=${createdOrder.orderCode}`
         }).catch(err => console.error('Checkout notification error:', err));
 
         return mapOrder(createdOrder);
@@ -502,7 +613,7 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
     }
 };
 
-export const getMyOrders = async ({ userId, page, limit, status }) => {
+export const getMyOrders = async ({ userId, page, limit, status, sort }) => {
     if (!mongoose.isValidObjectId(userId)) {
         throw createServiceError(400, 'Người dùng không hợp lệ', 'INVALID_OBJECT_ID');
     }
@@ -560,7 +671,9 @@ export const getMyOrders = async ({ userId, page, limit, status }) => {
                     },
                 },
             },
-            { $sort: { userHistoryPriority: 1, latestUserActivityAt: -1, createdAt: -1 } },
+            sort === 'recent'
+                ? { $sort: { createdAt: -1 } }
+                : { $sort: { userHistoryPriority: 1, latestUserActivityAt: -1, createdAt: -1 } },
             { $skip: paging.skip },
             { $limit: paging.limit },
         ]),
@@ -630,6 +743,9 @@ export const cancelMyOrder = async ({ userId, orderIdOrCode, reason, ipAddr }) =
     }
 
     const cancelReason = normalizeText(reason);
+    if (!cancelReason) {
+        throw createServiceError(400, 'Vui lòng cung cấp lý do hủy đơn hàng', 'MISSING_CANCEL_REASON');
+    }
     if (cancelReason.length > 300) {
         throw createServiceError(400, 'Lý do hủy không được vượt quá 300 ký tự', 'INVALID_CANCEL_REASON');
     }
@@ -703,6 +819,51 @@ export const cancelMyOrder = async ({ userId, orderIdOrCode, reason, ipAddr }) =
             await order.save({ session });
             resultOrder = order;
         });
+
+        // Trigger Notification for Admin (R1) and Customer when an order is cancelled or cancellation is requested
+        if (resultOrder) {
+            const customerName = resultOrder.shippingInfo?.fullName || 'Khách hàng';
+            const customerPhone = resultOrder.shippingInfo?.phone ? ` (SĐT: ${resultOrder.shippingInfo.phone})` : '';
+            if (resultOrder.status === 'CANCELLED') {
+                // Gửi thông báo cho admin
+                createNotification({
+                    recipientRole: 'R1',
+                    type: 'ORDER_STATUS_UPDATE',
+                    title: 'Đơn hàng đã hủy',
+                    content: `Khách hàng ${customerName}${customerPhone} đã hủy đơn hàng ${resultOrder.orderCode}. Lý do: ${cancelReason}`,
+                    link: `/admin/orders?code=${resultOrder.orderCode}`
+                }).catch(err => console.error('Cancel order admin notification error:', err));
+
+                // Gửi thông báo hoàn trả voucher/điểm cho khách hàng khi tự hủy đơn thành công
+                let refundDetails = '';
+                const details = [];
+                if (resultOrder.pointsUsed && resultOrder.pointsUsed > 0) {
+                    details.push(`${resultOrder.pointsUsed} điểm tích lũy`);
+                }
+                if (resultOrder.couponCode) {
+                    details.push(`mã giảm giá ${resultOrder.couponCode}`);
+                }
+                if (details.length > 0) {
+                    refundDetails = ` Đồng thời, hệ thống đã hoàn trả ${details.join(' và ')} vào tài khoản của bạn để sử dụng cho các đơn hàng sau.`;
+                }
+
+                createNotification({
+                    recipientId: resultOrder.user,
+                    type: 'ORDER_STATUS_UPDATE',
+                    title: 'Hủy đơn hàng thành công',
+                    content: `Đơn hàng ${resultOrder.orderCode} của bạn đã được hủy thành công.${refundDetails}`,
+                    link: `/orders?code=${resultOrder.orderCode}`
+                }).catch(err => console.error('Cancel order customer notification error:', err));
+            } else if (resultOrder.status === 'CANCEL_REQUESTED') {
+                createNotification({
+                    recipientRole: 'R1',
+                    type: 'ORDER_STATUS_UPDATE',
+                    title: 'Yêu cầu hủy đơn hàng',
+                    content: `Khách hàng ${customerName}${customerPhone} đã yêu cầu hủy đơn hàng ${resultOrder.orderCode}. Lý do: ${cancelReason}`,
+                    link: `/admin/orders?code=${resultOrder.orderCode}`
+                }).catch(err => console.error('Cancel request admin notification error:', err));
+            }
+        }
 
         return mapOrder(resultOrder);
     } finally {
@@ -867,7 +1028,7 @@ export const updateAdminOrderStatus = async ({ orderIdOrCode, status, note }) =>
         type: 'ORDER_STATUS_UPDATE',
         title: 'Cập nhật trạng thái đơn hàng',
         content: `Đơn hàng ${order.orderCode} của bạn đã chuyển sang trạng thái: ${nextStatus}. Ghi chú: ${adminNote || 'Không có'}`,
-        link: `/orders`
+        link: `/orders?code=${order.orderCode}`
     }).catch(err => console.error('Order status update notification error:', err));
 
     return mapOrder(order);
@@ -953,14 +1114,29 @@ export const resolveAdminCancelRequest = async ({ orderIdOrCode, action, note, i
         });
 
         // Trigger Notification for the Customer (User)
-        const actionText = action === 'APPROVE' ? 'được chấp nhận' : 'bị từ chối';
-        const statusText = action === 'APPROVE' ? 'Đã hủy' : 'Đang chuẩn bị hàng';
+        const actionText = normalizedAction === 'APPROVE' ? 'được chấp nhận' : 'bị từ chối';
+        const statusText = normalizedAction === 'APPROVE' ? 'Đã hủy' : 'Đang chuẩn bị hàng';
+
+        let refundDetails = '';
+        if (normalizedAction === 'APPROVE' && resultOrder) {
+            const details = [];
+            if (resultOrder.pointsUsed && resultOrder.pointsUsed > 0) {
+                details.push(`${resultOrder.pointsUsed} điểm tích lũy`);
+            }
+            if (resultOrder.couponCode) {
+                details.push(`mã giảm giá ${resultOrder.couponCode}`);
+            }
+            if (details.length > 0) {
+                refundDetails = ` Đồng thời, hệ thống đã hoàn trả ${details.join(' và ')} vào tài khoản của bạn để sử dụng cho các đơn hàng sau.`;
+            }
+        }
+
         createNotification({
             recipientId: resultOrder.user,
             type: 'ORDER_STATUS_UPDATE',
             title: 'Yêu cầu hủy đơn hàng',
-            content: `Yêu cầu hủy đơn hàng ${resultOrder.orderCode} của bạn đã ${actionText}. Trạng thái hiện tại: ${statusText}. Ghi chú: ${adminNote || 'Không có'}`,
-            link: `/orders`
+            content: `Yêu cầu hủy đơn hàng ${resultOrder.orderCode} của bạn đã ${actionText}. Trạng thái hiện tại: ${statusText}.${refundDetails} Ghi chú: ${adminNote || 'Không có'}`,
+            link: `/orders?code=${resultOrder.orderCode}`
         }).catch(err => console.error('Cancel request resolution notification error:', err));
 
         return mapOrder(resultOrder);
@@ -1116,10 +1292,11 @@ export const verifyMyDeliveryQr = async ({ userId, qrContent }) => {
 };
 
 // Tien - Tính toán trước số tiền giảm giá và tổng thanh toán khi checkout
-export const previewCheckout = async ({ userId, shippingInfo, couponCode, usePoints }) => {
+export const previewCheckout = async ({ userId, shippingInfo, couponCode, usePoints, itemIds }) => {
     const orderDraft = await buildOrderDraftFromCart({
         userId,
         shippingInfo,
+        itemIds,
         createServiceError
     });
 
