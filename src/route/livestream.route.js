@@ -1,6 +1,7 @@
 import express from 'express';
 import * as livestreamController from '../controllers/livestream.controller';
-import { authenticateToken, authorizeAdmin, authorizeUser } from '../middleware/loginMiddleware';
+import * as liveChatController from '../controllers/liveChat.controller';
+import { authenticateToken, authorizeAdmin, authorizeRoles } from '../middleware/loginMiddleware';
 import { endLivestreamValidator, startLivestreamValidator } from '../middleware/livestream.middleware';
 
 const router = express.Router();
@@ -9,8 +10,15 @@ const initLivestreamRoutes = (app) => {
     router.get(
         '/api/livestream/current',
         authenticateToken,
-        authorizeUser,
+        authorizeRoles('R1', 'R2', 'R3', 'R4'),
         livestreamController.getCurrentLivestreamController
+    );
+
+    router.get(
+        '/api/livestream/:liveId/chat/messages',
+        authenticateToken,
+        authorizeRoles('R1', 'R2', 'R3', 'R4'),
+        liveChatController.getRecentMessagesController
     );
 
     router.post(
