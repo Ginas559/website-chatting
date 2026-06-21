@@ -15,6 +15,12 @@ import {
     deleteMessage,
     pinMessage,
 } from '../services/liveChat.service';
+import { moderateLiveChatMessage } from '../services/chatModeration.service';
+import {
+    addLevelOneWarning,
+    createLevelTwoBan,
+    getActiveBanCase,
+} from '../services/liveChatModeration.service';
 
 const LIVESTREAM_ADMIN_ROOM = 'livestream-admin';
 const LIVESTREAM_USERS_ROOM = 'livestream-users';
@@ -240,6 +246,84 @@ export const registerLivestreamSocket = (io, socket) => {
         }
 
         try {
+            await assertLiveChatAvailable(liveId);
+
+            const activeBan = await getActiveBanCase(user.id);
+            if (activeBan) {
+                socket.emit('live-chat-banned', {
+                    message: 'Bạn đang bị khóa chat do vi phạm quy định.',
+                    bannedUntil: activeBan.bannedUntil,
+                    banDays: activeBan.banDays,
+                    moderationCaseId: activeBan._id,
+                });
+                return;
+            }
+
+            const moderationResult = await moderateLiveChatMessage({ content });
+            const shouldApplyAiBan = ['R2', 'R4'].includes(user.roleId);
+
+            if (moderationResult.predictedLabel >= 2 && shouldApplyAiBan) {
+                const banCase = await createLevelTwoBan({
+                    liveId,
+                    userId: user.id,
+                    roleId: user.roleId,
+                    content,
+                    moderationResult,
+                });
+
+                chatLastSentAt.set(rateKey, now);
+                socket.emit('live-chat-banned', {
+                    message: 'Bình luận vi phạm nghiêm trọng. Bạn đã bị khóa chat.',
+                    bannedUntil: banCase.bannedUntil,
+                    banDays: banCase.banDays,
+                    moderationCaseId: banCase._id,
+                });
+                io.to(`live-chat:${liveId}`).emit('live-chat-user-banned', {
+                    liveId,
+                    banCase,
+                });
+                return;
+            }
+
+            if (moderationResult.predictedLabel === 1 && shouldApplyAiBan) {
+                const warningResult = await addLevelOneWarning({
+                    liveId,
+                    userId: user.id,
+                    roleId: user.roleId,
+                    content,
+                    moderationResult,
+                });
+
+                chatLastSentAt.set(rateKey, now);
+                if (warningResult.banned) {
+                    socket.emit('live-chat-banned', {
+                        message: 'Bạn đã có 3 bình luận chưa phù hợp trong cùng phiên live nên bị khóa chat.',
+                        bannedUntil: warningResult.banCase.bannedUntil,
+                        banDays: warningResult.banCase.banDays,
+                        moderationCaseId: warningResult.banCase._id,
+                    });
+                    io.to(`live-chat:${liveId}`).emit('live-chat-user-banned', {
+                        liveId,
+                        banCase: warningResult.banCase,
+                    });
+                    return;
+                }
+
+                socket.emit('live-chat-warning', {
+                    message: 'Bình luận của bạn chưa phù hợp. Nếu vi phạm 3 lần trong cùng phiên live, bạn sẽ bị khóa chat.',
+                    warningCount: warningResult.warningCount,
+                    remainingWarnings: warningResult.remainingWarnings,
+                });
+                return;
+            }
+
+            if (moderationResult.predictedLabel > 0 && ['R1', 'R3'].includes(user.roleId)) {
+                socket.emit('live-chat-warning', {
+                    message: 'AI phát hiện bình luận có rủi ro, nhưng tài khoản nhân sự không bị tự động khóa.',
+                    moderationResult,
+                });
+            }
+
             const message = await createMessage({
                 liveId,
                 userId: user.id,
