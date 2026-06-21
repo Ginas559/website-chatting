@@ -54,6 +54,7 @@ export const checkoutOrderController = async (req, res) => {
         const paymentMethod = normalizePaymentMethod(req.body?.paymentMethod);
         const couponCode = req.body?.couponCode;
         const usePoints = req.body?.usePoints;
+        const pointsToUse = req.body?.pointsToUse;
         const itemIds = req.body?.itemIds;
 
         if (paymentMethod === 'VNPAY') {
@@ -64,6 +65,7 @@ export const checkoutOrderController = async (req, res) => {
                 bankCode: req.body?.bankCode,
                 couponCode,
                 usePoints,
+                pointsToUse,
                 itemIds,
             });
 
@@ -80,6 +82,7 @@ export const checkoutOrderController = async (req, res) => {
             paymentMethod,
             couponCode,
             usePoints,
+            pointsToUse,
             shippingDistanceKm: req.body?.shippingDistanceKm ?? req.body?.shippingInfo?.shippingDistanceKm,
             itemIds,
         });
@@ -347,6 +350,7 @@ export const previewCheckoutController = async (req, res) => {
             shippingInfo: req.body?.shippingInfo || req.body || {},
             couponCode: req.body?.couponCode,
             usePoints: req.body?.usePoints,
+            pointsToUse: req.body?.pointsToUse,
             itemIds: req.body?.itemIds,
         });
 

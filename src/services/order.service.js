@@ -440,7 +440,7 @@ const validateAdminNote = (note) => {
     return normalizedNote;
 };
 
-export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shippingDistanceKm, couponCode, usePoints, itemIds }) => {
+export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shippingDistanceKm, couponCode, usePoints, pointsToUse, itemIds }) => {
     const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
     const session = await mongoose.startSession();
 
@@ -531,15 +531,27 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
                 const user = await User.findById(userId).session(session);
                 const userPoints = user?.rewardPoints || 0;
 
-                if (userPoints > 0) {
+                let targetPoints = userPoints;
+                if (pointsToUse !== undefined && pointsToUse !== null) {
+                    const parsed = parseInt(pointsToUse, 10);
+                    if (isNaN(parsed) || parsed < 0) {
+                        throw createServiceError(400, 'Số điểm tích lũy không hợp lệ', 'INVALID_POINTS_TO_USE');
+                    }
+                    if (parsed > userPoints) {
+                        throw createServiceError(400, `Bạn chỉ có tối đa ${userPoints} điểm tích lũy`, 'EXCEEDED_MAX_POINTS');
+                    }
+                    targetPoints = parsed;
+                }
+
+                if (targetPoints > 0) {
                     const rate = 1000;
                     const remainingAmount = subtotal + shippingFee - couponDiscount;
                     const maxPointsDiscount = Math.max(0, remainingAmount);
-                    const potentialPointsDiscount = userPoints * rate;
+                    const potentialPointsDiscount = targetPoints * rate;
 
                     if (potentialPointsDiscount <= maxPointsDiscount) {
                         pointsDiscount = potentialPointsDiscount;
-                        pointsUsed = userPoints;
+                        pointsUsed = targetPoints;
                     } else {
                         pointsDiscount = maxPointsDiscount;
                         pointsUsed = Math.ceil(maxPointsDiscount / rate);
@@ -1292,7 +1304,7 @@ export const verifyMyDeliveryQr = async ({ userId, qrContent }) => {
 };
 
 // Tien - Tính toán trước số tiền giảm giá và tổng thanh toán khi checkout
-export const previewCheckout = async ({ userId, shippingInfo, couponCode, usePoints, itemIds }) => {
+export const previewCheckout = async ({ userId, shippingInfo, couponCode, usePoints, pointsToUse, itemIds }) => {
     const orderDraft = await buildOrderDraftFromCart({
         userId,
         shippingInfo,
@@ -1364,15 +1376,27 @@ export const previewCheckout = async ({ userId, shippingInfo, couponCode, usePoi
         const user = await User.findById(userId).select('rewardPoints').lean();
         const userPoints = user?.rewardPoints || 0;
 
-        if (userPoints > 0) {
+        let targetPoints = userPoints;
+        if (pointsToUse !== undefined && pointsToUse !== null) {
+            const parsed = parseInt(pointsToUse, 10);
+            if (isNaN(parsed) || parsed < 0) {
+                throw createServiceError(400, 'Số điểm tích lũy không hợp lệ', 'INVALID_POINTS_TO_USE');
+            }
+            if (parsed > userPoints) {
+                throw createServiceError(400, `Bạn chỉ có tối đa ${userPoints} điểm tích lũy`, 'EXCEEDED_MAX_POINTS');
+            }
+            targetPoints = parsed;
+        }
+
+        if (targetPoints > 0) {
             const rate = 1000;
             const remainingAmount = subtotal + shippingFee - couponDiscount;
             const maxPointsDiscount = Math.max(0, remainingAmount);
-            const potentialPointsDiscount = userPoints * rate;
+            const potentialPointsDiscount = targetPoints * rate;
 
             if (potentialPointsDiscount <= maxPointsDiscount) {
                 pointsDiscount = potentialPointsDiscount;
-                pointsUsed = userPoints;
+                pointsUsed = targetPoints;
             } else {
                 pointsDiscount = maxPointsDiscount;
                 pointsUsed = Math.ceil(maxPointsDiscount / rate);
