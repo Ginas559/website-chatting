@@ -27,11 +27,16 @@ const fail = (res, error, fallback = 'Có lỗi xảy ra') => {
 export const getCurrentLivestreamController = async (req, res) => {
     try {
         const livestream = await getCurrentLivestreamService();
-        const activeLivestream = livestream && hasActiveLivestreamAdmin(livestream._id) ? livestream : null;
+        const hasActiveAdminSocket = Boolean(livestream && hasActiveLivestreamAdmin(livestream._id));
+        const hasLive = Boolean(livestream && hasActiveAdminSocket);
 
         return ok(res, {
-            message: activeLivestream ? 'Lấy livestream hiện tại thành công' : 'Hiện chưa có livestream',
-            data: activeLivestream,
+            message: hasLive ? 'Lấy livestream hiện tại thành công' : 'Hiện chưa có livestream',
+            data: {
+                hasLive,
+                live: hasLive ? livestream : null,
+                hasActiveAdminSocket,
+            },
         });
     } catch (error) {
         return fail(res, error, 'Không thể lấy livestream hiện tại');
