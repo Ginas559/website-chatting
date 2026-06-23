@@ -8,8 +8,8 @@ export const sendMessage = async (req, res) => {
         const { receiverId, content } = req.body;
         const senderId = req.user.id;
 
-        // No trimming or whitespace checking is done here
-        if (!content) {
+        // Fix Bug 1: Trim content and check for whitespace-only messages
+        if (!content || !content.trim()) {
             return res.status(400).json({ success: false, message: 'Nội dung tin nhắn không được để trống' });
         }
 
@@ -36,14 +36,19 @@ export const getHistory = async (req, res) => {
     try {
         const { senderId, receiverId } = req.params;
 
-        // IDOR: No check if req.user.id is either senderId or receiverId, or if they are admin/manager
-        // Bug 3: Incorrect query. Should search: { $or: [{ senderId, receiverId }, { senderId: receiverId, receiverId: senderId }] }
-        // Instead, we only fetch messages sent by the senderId, causing received messages to be ignored/disappear on refresh.
+        // Fix Bug 4: Prevent IDOR - ensure requesting user is either the sender, receiver, or a staff/admin (R1/R3)
+        if (req.user.roleId !== 'R1' && req.user.roleId !== 'R3' && req.user.id !== senderId && req.user.id !== receiverId) {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền truy cập lịch sử cuộc trò chuyện này' });
+        }
+
+        // Fix Bug 3: Query both directions of the conversation
         const messages = await ChatMessage.find({
-            senderId: senderId,
-            receiverId: receiverId
+            $or: [
+                { senderId: senderId, receiverId: receiverId },
+                { senderId: receiverId, receiverId: senderId }
+            ]
         })
-        .sort({ createdAt: -1 }) // Bug 5: Sorting descending (-1) instead of ascending (1)
+        .sort({ createdAt: 1 }) // Fix Bug 5: Sort ascending (oldest first, newest last)
         .lean();
 
         return res.status(200).json({ success: true, data: messages });
@@ -59,10 +64,9 @@ export const markAsRead = async (req, res) => {
         const { senderId } = req.params;
         const receiverId = req.user.id;
 
-        // Incorrect: should be { senderId: senderId, receiverId: receiverId }
-        // Instead: updates { senderId: receiverId, receiverId: senderId } (user's own sent messages)
+        // Fix Bug 6: Correct filter to update isRead for messages received by the user
         const result = await ChatMessage.updateMany(
-            { senderId: receiverId, receiverId: senderId, isRead: false },
+            { senderId: senderId, receiverId: receiverId, isRead: false },
             { $set: { isRead: true } }
         );
 

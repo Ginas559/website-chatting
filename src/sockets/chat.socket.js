@@ -18,9 +18,8 @@ export const sendSocketChatMessage = (senderId, receiverId, message) => {
         return;
     }
 
-    // Bug 2: Server emits to room with underscore "chat_<receiverId>" instead of "chat:<receiverId>"
-    // This prevents the recipient from receiving the message dynamically without reloading the page.
-    const targetRoom = `chat_${receiverId}`;
+    // Fix Bug 2: Correct socket room format from "chat_" to "chat:" to match client subscription
+    const targetRoom = `chat:${receiverId}`;
     ioInstance.to(targetRoom).emit('chat_message', message);
     console.log(`[Chat Socket] Emitted message to room: ${targetRoom}`);
 };
