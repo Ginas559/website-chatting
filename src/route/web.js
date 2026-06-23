@@ -33,6 +33,7 @@ import initPaymentRoutes from "./payment.route.js";
 import initReviewRoutes from "./review.route.js";
 import initNotificationRoutes from "./notification.route.js";
 import initLivestreamRoutes from "./livestream.route.js";
+import initChatRoutes from "./chat.route.js";
 
 let router = express.Router();
 
@@ -79,6 +80,7 @@ let initWebRoutes = (app) => {
     initReviewRoutes(app);
     initNotificationRoutes(app);
     initLivestreamRoutes(app);
+    initChatRoutes(app);
 
     router.get('/admin/users', authenticateToken, authorizeRoles('R1', 'R3'), userManagementController.listUsers);
     router.post('/admin/users', authenticateToken, authorizeRoles('R1', 'R3'), createUserValidator, userManagementController.createUser);
