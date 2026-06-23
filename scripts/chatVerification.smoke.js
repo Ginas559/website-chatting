@@ -41,9 +41,9 @@ const run = async () => {
         console.log(`Created test users: User A (${userA._id}) and User B (${userB._id})`);
 
         // ==========================================
-        // TEST BUG 1: Empty / Whitespace-only Message Bypassed
+        // TEST BUG 1: Empty / Whitespace-only Message Rejected (Bug 1 Fixed)
         // ==========================================
-        console.log('\n--- Testing Bug 1: Empty / Whitespace-only Message check bypass ---');
+        console.log('\n--- Testing Bug 1: Empty / Whitespace-only Message validation ---');
         
         // Mock req/res for sendMessage
         let req1 = {
@@ -61,16 +61,14 @@ const run = async () => {
 
         await sendMessage(req1, res1);
         
-        assert.equal(resData1.code, 200, 'Whitespace message should be accepted (due to Bug 1)');
-        assert.ok(resData1.message, 'ChatMessage should have been created');
-        assert.equal(resData1.message.content, '   ');
-        msgId1 = resData1.message._id;
-        console.log('Bug 1 verified: Whitespace-only message accepted and saved in DB.');
+        assert.equal(resData1.code, 400, 'Whitespace message should be rejected (Bug 1 fixed)');
+        assert.equal(resData1.success, false);
+        console.log('Bug 1 Resolution verified: Whitespace-only message successfully rejected.');
 
         // ==========================================
-        // TEST BUG 3 & BUG 5: Chat History Incorrect Query (One-way) and Descending Sorting
+        // TEST BUG 3 & BUG 5: Chat History Bidirectional and Ascending Sorting (Bugs 3 & 5 Fixed)
         // ==========================================
-        console.log('\n--- Testing Bug 3 & Bug 5: One-way history & Descending sort ---');
+        console.log('\n--- Testing Bug 3 & Bug 5: Bidirectional history & Ascending sort ---');
 
         // Create standard messages
         // Msg 2: Sent by User A
@@ -107,28 +105,28 @@ const run = async () => {
         await getHistory(req2, res2);
 
         assert.equal(resData2.code, 200);
-        // Bug 3 validation: only messages where senderId = User A should be fetched
+        // Bug 3 Resolution validation: both messages (sent and received) should be fetched
         const hasIncomingMsg = resData2.data.some(m => m.content.includes('Hi Customer'));
-        assert.equal(hasIncomingMsg, false, 'Should NOT return messages sent by User B (due to Bug 3 query logic)');
-        console.log('Bug 3 verified: History endpoint only fetches messages sent by User A (one-way history).');
+        assert.equal(hasIncomingMsg, true, 'Should return messages sent by User B (Bug 3 fixed)');
+        console.log('Bug 3 Resolution verified: History endpoint returns messages from both directions.');
 
-        // Bug 5 validation: sorted by createdAt in descending order
+        // Bug 5 Resolution validation: sorted by createdAt in ascending order (oldest first)
         if (resData2.data.length > 1) {
             const dateFirst = new Date(resData2.data[0].createdAt).getTime();
             const dateSecond = new Date(resData2.data[1].createdAt).getTime();
-            assert.ok(dateFirst >= dateSecond, 'History should be sorted newest first (due to Bug 5)');
+            assert.ok(dateFirst <= dateSecond, 'History should be sorted oldest first (Bug 5 fixed)');
         }
-        console.log('Bug 5 verified: Chat history is sorted in descending order.');
+        console.log('Bug 5 Resolution verified: Chat history is sorted in ascending order.');
 
         // ==========================================
-        // TEST BUG 4: IDOR (No authorization check in history)
+        // TEST BUG 4: IDOR (Authorization check in history - Bug 4 Fixed)
         // ==========================================
-        console.log('\n--- Testing Bug 4: IDOR (No authentication/ownership validation) ---');
+        console.log('\n--- Testing Bug 4: IDOR Authorization check ---');
         
         // User C (malicious observer) requests history between User A and User B
         const userC_Id = new mongoose.Types.ObjectId();
         let req3 = {
-            user: { id: userC_Id.toString() }, // Requesting user is User C
+            user: { id: userC_Id.toString(), roleId: 'R2' }, // Requesting user is User C (Regular User)
             params: { senderId: userA._id.toString(), receiverId: userB._id.toString() }
         };
         let resData3 = null;
@@ -141,14 +139,14 @@ const run = async () => {
         };
 
         await getHistory(req3, res3);
-        assert.equal(resData3.code, 200, 'Endpoint should return 200 OK without verifying ownership');
-        assert.ok(resData3.data.length > 0, 'Should leakage private chat data to unauthorized user');
-        console.log('Bug 4 verified: IDOR is active. Unauthorized user can view private messages.');
+        assert.equal(resData3.code, 403, 'Endpoint should return 403 Forbidden for unauthorized users (Bug 4 fixed)');
+        assert.equal(resData3.success, false);
+        console.log('Bug 4 Resolution verified: IDOR blocked. Unauthorized user cannot view private messages.');
 
         // ==========================================
-        // TEST BUG 6: Mark As Read Logic Error (marks sender\'s messages instead of receiver\'s)
+        // TEST BUG 6: Mark As Read Logic (marks received messages - Bug 6 Fixed)
         // ==========================================
-        console.log('\n--- Testing Bug 6: Mark as Read Logic Error ---');
+        console.log('\n--- Testing Bug 6: Mark as Read Logic ---');
 
         // We want to mark messages sent by User B as read.
         // User A (receiver) calls the endpoint.
@@ -173,12 +171,12 @@ const run = async () => {
         const dbMsg2 = await ChatMessage.findById(msgId2); // Sent by User A
         const dbMsg3 = await ChatMessage.findById(msgId3); // Sent by User B
 
-        assert.equal(dbMsg3.isRead, false, 'Incoming message from User B should remain unread (due to Bug 6 logic)');
-        assert.equal(dbMsg2.isRead, true, 'User A\'s own sent message is incorrectly marked as read (due to Bug 6)');
-        console.log('Bug 6 verified: markAsRead updates own sent messages instead of received messages.');
+        assert.equal(dbMsg3.isRead, true, 'Incoming message from User B should be marked as read (Bug 6 fixed)');
+        assert.equal(dbMsg2.isRead, false, 'User A\'s own sent message should remain unread (Bug 6 fixed)');
+        console.log('Bug 6 Resolution verified: markAsRead correctly updates received messages.');
 
         console.log('\n==========================================');
-        console.log('All backend chat bugs successfully verified!');
+        console.log('All backend chat bugs successfully resolved & verified!');
         console.log('==========================================');
 
     } finally {
