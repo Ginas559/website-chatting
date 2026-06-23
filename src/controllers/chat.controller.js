@@ -35,23 +35,35 @@ export const sendMessage = async (req, res) => {
 export const getHistory = async (req, res) => {
     try {
         const { senderId, receiverId } = req.params;
+        const { before, limit = 20 } = req.query || {};
 
         // Fix Bug 4: Prevent IDOR - ensure requesting user is either the sender, receiver, or a staff/admin (R1/R3)
         if (req.user.roleId !== 'R1' && req.user.roleId !== 'R3' && req.user.id !== senderId && req.user.id !== receiverId) {
             return res.status(403).json({ success: false, message: 'Bạn không có quyền truy cập lịch sử cuộc trò chuyện này' });
         }
 
-        // Fix Bug 3: Query both directions of the conversation
-        const messages = await ChatMessage.find({
+        const limitNum = parseInt(limit, 10) || 20;
+        const query = {
             $or: [
                 { senderId: senderId, receiverId: receiverId },
                 { senderId: receiverId, receiverId: senderId }
             ]
-        })
-        .sort({ createdAt: 1 }) // Fix Bug 5: Sort ascending (oldest first, newest last)
-        .lean();
+        };
 
-        return res.status(200).json({ success: true, data: messages });
+        if (before) {
+            query.createdAt = { $lt: new Date(before) };
+        }
+
+        // Fetch newest first for pagination, then we will reverse
+        const messages = await ChatMessage.find(query)
+            .sort({ createdAt: -1 })
+            .limit(limitNum)
+            .lean();
+
+        // Reverse to return ascending chronological order (oldest first)
+        messages.reverse();
+
+        return res.status(200).json({ success: true, data: messages, hasMore: messages.length === limitNum });
     } catch (error) {
         console.error('Get history error:', error);
         return res.status(500).json({ success: false, message: 'Lỗi máy chủ nội bộ' });
@@ -80,8 +92,14 @@ export const markAsRead = async (req, res) => {
 // Fetch list of contacts for Admin/Manager dashboard
 export const getChatContacts = async (req, res) => {
     try {
-        const uniqueSenders = await ChatMessage.distinct('senderId');
-        const uniqueReceivers = await ChatMessage.distinct('receiverId');
+        let uniqueSenders, uniqueReceivers;
+        if (req.user.roleId === 'R1' || req.user.roleId === 'R3') {
+            uniqueSenders = await ChatMessage.distinct('senderId');
+            uniqueReceivers = await ChatMessage.distinct('receiverId');
+        } else {
+            uniqueSenders = await ChatMessage.distinct('senderId', { receiverId: req.user.id });
+            uniqueReceivers = await ChatMessage.distinct('receiverId', { senderId: req.user.id });
+        }
         const allUserIds = [...new Set([...uniqueSenders, ...uniqueReceivers])];
 
         const filteredUserIds = allUserIds.filter(id => id.toString() !== req.user.id);
@@ -120,3 +138,32 @@ export const getSupportUser = async (req, res) => {
         return res.status(500).json({ success: false, message: 'Lỗi máy chủ nội bộ' });
     }
 };
+
+export const getChatUserById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user = await User.findById(id, 'email firstName lastName roleId image').lean();
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
+        }
+        return res.status(200).json({ success: true, data: user });
+    } catch (error) {
+        console.error('Get chat user by id error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi máy chủ nội bộ' });
+    }
+};
+
+export const getChatUsers = async (req, res) => {
+    try {
+        const users = await User.find(
+            { _id: { $ne: req.user.id } },
+            'email firstName lastName roleId image'
+        ).lean();
+        return res.status(200).json({ success: true, data: users });
+    } catch (error) {
+        console.error('Get chat users error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi máy chủ nội bộ' });
+    }
+};
+
+
