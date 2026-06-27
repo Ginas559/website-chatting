@@ -60,6 +60,8 @@ export const addToCartController = async (req, res) => {
             userId,
             productId: req.body?.productId,
             quantity: req.body?.quantity,
+            color: req.body?.color,
+            capacity: req.body?.capacity,
         });
 
         return sendSuccessResponse(res, {
@@ -106,6 +108,8 @@ export const updateCartItemQuantityController = async (req, res) => {
             userId,
             productId: req.params?.productId,
             quantity: req.body?.quantity,
+            color: req.body?.color,
+            capacity: req.body?.capacity,
         });
 
         return sendSuccessResponse(res, {

@@ -12,6 +12,7 @@ import {
     ignoreLogger,
 } from 'vnpay';
 import Order from '../models/order.model.js';
+import User from '../models/user';
 import { createNotification } from '../utils/notification';
 import {
     applyStockForOrderItems,
@@ -186,7 +187,7 @@ const buildVnpayPaymentUrl = ({ order, ipAddr, bankCode }) => {
     });
 };
 
-export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr, bankCode }) => {
+export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr, bankCode, productIds, directItem, couponCode }) => {
     const session = await mongoose.startSession();
 
     try {
@@ -198,7 +199,34 @@ export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr,
                 shippingInfo,
                 session,
                 createServiceError,
+                productIds,
+                directItem,
             });
+
+            let discountAmount = 0;
+            if (couponCode) {
+                const user = await User.findById(userId).session(session);
+                if (!user) {
+                    throw createServiceError(404, 'Không tìm thấy thông tin người dùng', 'USER_NOT_FOUND');
+                }
+                const coupon = user.rewardCoupons.find(
+                    (c) => c.code === couponCode && !c.isUsed && c.expiresAt > new Date()
+                );
+                if (!coupon) {
+                    throw createServiceError(400, 'Mã giảm giá không hợp lệ, đã được sử dụng hoặc đã hết hạn', 'INVALID_COUPON');
+                }
+                if (orderDraft.subtotal < coupon.minOrderAmount) {
+                    throw createServiceError(400, `Đơn hàng tối thiểu phải đạt ${coupon.minOrderAmount.toLocaleString('vi-VN')}đ để sử dụng mã này`, 'COUPON_MIN_ORDER_AMOUNT_NOT_MET');
+                }
+                
+                discountAmount = Math.round(orderDraft.subtotal * (coupon.discountPercent / 100));
+                coupon.isUsed = true;
+                coupon.usedAt = new Date();
+                
+                await user.save({ session });
+            }
+
+            const finalTotalAmount = Math.max(0, orderDraft.totalAmount - discountAmount);
 
             const [order] = await Order.create(
                 [
@@ -209,7 +237,9 @@ export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr,
                         shippingInfo: orderDraft.shippingInfo,
                         subtotal: orderDraft.subtotal,
                         shippingFee: orderDraft.shippingFee,
-                        totalAmount: orderDraft.totalAmount,
+                        totalAmount: finalTotalAmount,
+                        couponCode: couponCode || '',
+                        discountAmount: discountAmount,
                         paymentMethod: VNPAY_PROVIDER,
                         paymentStatus: 'UNPAID',
                         paymentInfo: { provider: VNPAY_PROVIDER },

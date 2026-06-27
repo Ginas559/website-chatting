@@ -23,6 +23,18 @@ let handleLogin = async (req, res) => {
         let result = await loginService.handleUserLogin(email, password);
 
         if (result.errCode !== 0) {
+            if (result.errCode === 1 || result.errCode === 2) {
+                const remaining = req.rateLimit ? req.rateLimit.remaining : null;
+                let message = 'Tài khoản hoặc mật khẩu không hợp lệ.';
+                if (remaining !== null) {
+                    message += ` Bạn còn ${remaining} lần thử trước khi bị chặn.`;
+                }
+                return res.status(401).json({
+                    errCode: result.errCode,
+                    errMessage: message,
+                    remainingAttempts: remaining
+                });
+            }
             return res.status(401).json(result);
         }
 

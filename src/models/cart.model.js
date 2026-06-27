@@ -6,6 +6,8 @@ const cartSnapshotSchema = new mongoose.Schema(
         image: { type: String, required: true, trim: true },
         price: { type: Number, required: true, min: 0 },
         brand: { type: String, required: true, trim: true },
+        color: { type: String, trim: true, default: '' },
+        capacity: { type: String, trim: true, default: '' },
     },
     { _id: false }
 );

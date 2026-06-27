@@ -40,6 +40,7 @@ export const getProductReviewsController = async (req, res) => {
             slug: req.params?.slug,
             page: req.query?.page,
             limit: req.query?.limit,
+            rating: req.query?.rating,
             userId: getOptionalUserId(req),
         });
 

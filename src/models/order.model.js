@@ -8,6 +8,8 @@ const orderItemSnapshotSchema = new mongoose.Schema(
         price: { type: Number, required: true, min: 0 },
         brand: { type: String, required: true, trim: true },
         category: { type: String, required: true, trim: true },
+        color: { type: String, trim: true, default: '' },
+        capacity: { type: String, trim: true, default: '' },
     },
     { _id: false }
 );
@@ -177,6 +179,8 @@ const orderSchema = new mongoose.Schema(
             type: deliveryVerificationSchema,
             default: () => ({}),
         },
+        couponCode: { type: String, default: '', trim: true },
+        discountAmount: { type: Number, default: 0, min: 0 },
     },
     {
         timestamps: true,
