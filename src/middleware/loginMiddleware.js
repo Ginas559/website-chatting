@@ -118,7 +118,7 @@ export const authenticateToken = (req, res, next) => {
     // Verify access token
     const decoded = verifyAccessToken(token);
     if (!decoded) {
-        return res.status(403).json({
+        return res.status(401).json({
             errCode: -1,
             errMessage: 'Token không hợp lệ hoặc đã hết hạn. Vui lòng refresh token hoặc đăng nhập lại.'
         });

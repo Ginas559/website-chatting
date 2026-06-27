@@ -60,11 +60,13 @@ const ensureObjectId = (value, fieldName) => {
     }
 };
 
-const normalizeSnapshot = (product) => ({
+const normalizeSnapshot = (product, color = '', capacity = '') => ({
     name: product.name,
     image: product.image || (Array.isArray(product.images) && product.images[0]) || '',
     price: Number(product.price) || 0,
     brand: product.brand,
+    color,
+    capacity,
 });
 
 const getItemSnapshot = (item) => {
@@ -214,7 +216,7 @@ export const getCurrentCart = async ({ userId, page, limit } = {}) => {
     return buildCartSnapshot(cart, paginationInput);
 };
 
-export const addToCart = async ({ userId, productId, quantity = 1 }) => {
+export const addToCart = async ({ userId, productId, quantity = 1, color = '', capacity = '' }) => {
     ensureObjectId(userId, 'Người dùng');
     ensureObjectId(productId, 'Sản phẩm');
 
@@ -238,12 +240,13 @@ export const addToCart = async ({ userId, productId, quantity = 1 }) => {
         }
 
         existingItem.quantity = mergedQuantity;
-        existingItem.snapshot = existingItem.snapshot || normalizeSnapshot(product);
+        if (color) existingItem.snapshot.color = color;
+        if (capacity) existingItem.snapshot.capacity = capacity;
     } else {
         cartDoc.items.push({
             product: product._id,
             quantity: requestedQuantity,
-            snapshot: normalizeSnapshot(product),
+            snapshot: normalizeSnapshot(product, color, capacity),
         });
     }
 
@@ -270,7 +273,7 @@ export const removeFromCart = async ({ userId, productId }) => {
     return saveCart(cart);
 };
 
-export const updateCartItemQuantity = async ({ userId, productId, quantity }) => {
+export const updateCartItemQuantity = async ({ userId, productId, quantity, color = '', capacity = '' }) => {
     ensureObjectId(userId, 'Người dùng');
     ensureObjectId(productId, 'Sản phẩm');
 
@@ -290,7 +293,8 @@ export const updateCartItemQuantity = async ({ userId, productId, quantity }) =>
     }
 
     existingItem.quantity = requestedQuantity;
-    existingItem.snapshot = existingItem.snapshot || normalizeSnapshot(product);
+    if (color) existingItem.snapshot.color = color;
+    if (capacity) existingItem.snapshot.capacity = capacity;
 
     return saveCart(cart);
 };

@@ -102,6 +102,8 @@ const mapOrderItem = (cartItem, product) => {
             price: unitPrice,
             brand: cartItem.snapshot?.brand || product.brand,
             category: product.category,
+            color: cartItem.snapshot?.color || '',
+            capacity: cartItem.snapshot?.capacity || '',
         },
     };
 };
@@ -117,16 +119,50 @@ const getProductsByCartItems = async (items, session) => {
     }));
 };
 
-export const buildOrderDraftFromCart = async ({ userId, shippingInfo, session, createServiceError }) => {
+export const buildOrderDraftFromCart = async ({ userId, shippingInfo, session, createServiceError, productIds, directItem }) => {
     ensureObjectId(userId, 'Người dùng', createServiceError);
     const normalizedShippingInfo = normalizeShippingInfo(shippingInfo, createServiceError);
-    const cart = await Cart.findOne({ user: userId }).session(session);
 
-    if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
-        throw createServiceError(400, 'Giỏ hàng đang trống, không thể thanh toán', 'EMPTY_CART');
+    let itemsToProcess = [];
+    let cart = null;
+
+    if (directItem) {
+        const product = await Product.findById(directItem.productId).session(session).lean();
+        if (!product) {
+            throw createServiceError(400, 'Sản phẩm không tồn tại', 'PRODUCT_NOT_FOUND');
+        }
+        itemsToProcess = [{
+            product: directItem.productId,
+            quantity: Number(directItem.quantity || 1),
+            qty: Number(directItem.quantity || 1),
+            snapshot: {
+                name: product.name,
+                image: product.image,
+                price: product.price,
+                brand: product.brand,
+                color: directItem.color || '',
+                capacity: directItem.capacity || ''
+            }
+        }];
+    } else {
+        cart = await Cart.findOne({ user: userId }).session(session);
+
+        if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
+            throw createServiceError(400, 'Giỏ hàng đang trống, không thể thanh toán', 'EMPTY_CART');
+        }
+
+        itemsToProcess = cart.items;
+        if (Array.isArray(productIds) && productIds.length > 0) {
+            const productIdsStr = productIds.map(String);
+            itemsToProcess = cart.items.filter((item) => productIdsStr.includes(String(item.product)));
+        }
     }
 
-    const entries = await getProductsByCartItems(cart.items, session);
+    if (itemsToProcess.length === 0) {
+        throw createServiceError(400, 'Không có sản phẩm nào được chọn để thanh toán', 'EMPTY_CHECKOUT');
+    }
+
+    const entries = await getProductsByCartItems(itemsToProcess, session);
     entries.forEach(({ cartItem, product }) => assertProductCanCheckout(cartItem, product, createServiceError));
 
     const orderItems = entries.map(({ cartItem, product }) => mapOrderItem(cartItem, product));

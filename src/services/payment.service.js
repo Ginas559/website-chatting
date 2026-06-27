@@ -186,7 +186,7 @@ const buildVnpayPaymentUrl = ({ order, ipAddr, bankCode }) => {
     });
 };
 
-export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr, bankCode }) => {
+export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr, bankCode, productIds, directItem }) => {
     const session = await mongoose.startSession();
 
     try {
@@ -198,6 +198,8 @@ export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr,
                 shippingInfo,
                 session,
                 createServiceError,
+                productIds,
+                directItem,
             });
 
             const [order] = await Order.create(

@@ -243,7 +243,7 @@ const normalizeReviewText = (value, maxLength) => {
     return text;
 };
 
-export const getProductReviewOverview = async ({ slug, page, limit, userId = null }) => {
+export const getProductReviewOverview = async ({ slug, page, limit, rating = null, userId = null }) => {
     const product = await Product.findOne({ slug: normalizeText(slug), isActive: true }).lean();
 
     if (!product) {
@@ -251,21 +251,28 @@ export const getProductReviewOverview = async ({ slug, page, limit, userId = nul
     }
 
     const pagination = parsePagination({ page, limit });
-    const [summary, reviews, reviewableOrder, myReview] = await Promise.all([
+
+    // Build filter query - optionally filter by star rating
+    const reviewFilter = { product: product._id };
+    const parsedRating = Number(rating);
+    if (Number.isInteger(parsedRating) && parsedRating >= 1 && parsedRating <= 5) {
+        reviewFilter.rating = parsedRating;
+    }
+
+    const [summary, reviews, filteredTotal, reviewableOrder, myReview] = await Promise.all([
         aggregateReviewSummary(product._id),
-        Review.find({ product: product._id })
+        Review.find(reviewFilter)
             .sort({ createdAt: -1 })
             .skip(pagination.skip)
             .limit(pagination.limit)
             .populate('user', 'firstName lastName image roleId')
             .lean(),
+        Review.countDocuments(reviewFilter),
         userId ? findReviewableOrder({ userId, productId: product._id }) : Promise.resolve(null),
         userId
             ? Review.findOne({ user: userId, product: product._id }).sort({ createdAt: -1 }).lean()
             : Promise.resolve(null),
     ]);
-
-    const total = summary.totalReviews;
 
     return {
         product: {
@@ -282,8 +289,8 @@ export const getProductReviewOverview = async ({ slug, page, limit, userId = nul
         pagination: {
             page: pagination.page,
             limit: pagination.limit,
-            total,
-            totalPages: total > 0 ? Math.ceil(total / pagination.limit) : 1,
+            total: filteredTotal,
+            totalPages: filteredTotal > 0 ? Math.ceil(filteredTotal / pagination.limit) : 1,
         },
         canReview: Boolean(reviewableOrder),
         reviewableOrder: reviewableOrder

@@ -434,7 +434,7 @@ const validateAdminNote = (note) => {
     return normalizedNote;
 };
 
-export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shippingDistanceKm }) => {
+export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shippingDistanceKm, productIds, directItem }) => {
     const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
     const session = await mongoose.startSession();
 
@@ -447,6 +447,8 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
                 shippingInfo,
                 session,
                 createServiceError,
+                productIds,
+                directItem,
             });
             const ketQuaRuiRo = await layKetQuaRuiRoAnToan({
                 userId,
@@ -481,7 +483,7 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
                 { session }
             );
 
-            await clearCart(orderDraft.cart, session);
+            await clearOrderedItemsFromCart(userId, orderDraft.orderItems, session);
             createdOrder = order;
         });
 
