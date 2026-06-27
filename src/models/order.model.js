@@ -179,6 +179,8 @@ const orderSchema = new mongoose.Schema(
             type: deliveryVerificationSchema,
             default: () => ({}),
         },
+        couponCode: { type: String, default: '', trim: true },
+        discountAmount: { type: Number, default: 0, min: 0 },
     },
     {
         timestamps: true,

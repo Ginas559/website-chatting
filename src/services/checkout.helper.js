@@ -250,6 +250,8 @@ export const mapOrder = (order) => {
         isSuspicious: Boolean(order.isSuspicious),
         fraudProbability: Number(order.fraudProbability || 0),
         riskSource: order.riskSource || 'FALLBACK_DEFAULT',
+        couponCode: order.couponCode || '',
+        discountAmount: Number(order.discountAmount || 0),
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
     };

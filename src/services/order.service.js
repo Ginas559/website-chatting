@@ -434,7 +434,7 @@ const validateAdminNote = (note) => {
     return normalizedNote;
 };
 
-export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shippingDistanceKm, productIds, directItem }) => {
+export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shippingDistanceKm, productIds, directItem, couponCode }) => {
     const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
     const session = await mongoose.startSession();
 
@@ -450,9 +450,35 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
                 productIds,
                 directItem,
             });
+
+            let discountAmount = 0;
+            if (couponCode) {
+                const user = await User.findById(userId).session(session);
+                if (!user) {
+                    throw createServiceError(404, 'Không tìm thấy thông tin người dùng', 'USER_NOT_FOUND');
+                }
+                const coupon = user.rewardCoupons.find(
+                    (c) => c.code === couponCode && !c.isUsed && c.expiresAt > new Date()
+                );
+                if (!coupon) {
+                    throw createServiceError(400, 'Mã giảm giá không hợp lệ, đã được sử dụng hoặc đã hết hạn', 'INVALID_COUPON');
+                }
+                if (orderDraft.subtotal < coupon.minOrderAmount) {
+                    throw createServiceError(400, `Đơn hàng tối thiểu phải đạt ${coupon.minOrderAmount.toLocaleString('vi-VN')}đ để sử dụng mã này`, 'COUPON_MIN_ORDER_AMOUNT_NOT_MET');
+                }
+                
+                discountAmount = Math.round(orderDraft.subtotal * (coupon.discountPercent / 100));
+                coupon.isUsed = true;
+                coupon.usedAt = new Date();
+                
+                await user.save({ session });
+            }
+
+            const finalTotalAmount = Math.max(0, orderDraft.totalAmount - discountAmount);
+
             const ketQuaRuiRo = await layKetQuaRuiRoAnToan({
                 userId,
-                orderAmount: orderDraft.totalAmount,
+                orderAmount: finalTotalAmount,
                 shippingDistanceKm,
             });
 
@@ -467,7 +493,9 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
                         shippingInfo: orderDraft.shippingInfo,
                         subtotal: orderDraft.subtotal,
                         shippingFee: orderDraft.shippingFee,
-                        totalAmount: orderDraft.totalAmount,
+                        totalAmount: finalTotalAmount,
+                        couponCode: couponCode || '',
+                        discountAmount: discountAmount,
                         paymentMethod: normalizedPaymentMethod,
                         paymentStatus: 'UNPAID',
                         status: 'NEW',

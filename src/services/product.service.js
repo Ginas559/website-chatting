@@ -413,14 +413,21 @@ export const getMostViewedProducts = async ({ page = 1, limit = DEFAULT_HOME_SEC
     });
 };
 
-export const getProductDetailBySlug = async (slug) => {
-    const product = await Product.findOneAndUpdate(
-        { slug, isActive: true, isDeleted: { $ne: true } },
-        { $inc: { views: 1 } },
-        { new: true }
-    )
-        .select(PRODUCT_SELECT_FIELDS)
-        .lean();
+export const getProductDetailBySlug = async (slug, shouldIncrement = true) => {
+    let product;
+    if (shouldIncrement) {
+        product = await Product.findOneAndUpdate(
+            { slug, isActive: true, isDeleted: { $ne: true } },
+            { $inc: { views: 1 } },
+            { new: true }
+        )
+            .select(PRODUCT_SELECT_FIELDS)
+            .lean();
+    } else {
+        product = await Product.findOne({ slug, isActive: true, isDeleted: { $ne: true } })
+            .select(PRODUCT_SELECT_FIELDS)
+            .lean();
+    }
 
     if (!product) {
         return null;

@@ -105,6 +105,18 @@ export const getMostViewedProductsController = async (req, res) => {
     }
 };
 
+const recentViews = new Map();
+
+// Periodically clean up entries older than 10 seconds
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, time] of recentViews.entries()) {
+        if (now - time > 10000) {
+            recentViews.delete(key);
+        }
+    }
+}, 30000);
+
 export const getProductDetail = async (req, res) => {
     try {
         const { slug } = req.params;
@@ -117,7 +129,23 @@ export const getProductDetail = async (req, res) => {
             });
         }
 
-        const data = await getProductDetailBySlug(slug);
+        const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+        const viewKey = `${clientIp}_${slug}`;
+        const now = Date.now();
+        
+        let shouldIncrement = true;
+        if (recentViews.has(viewKey)) {
+            const lastViewTime = recentViews.get(viewKey);
+            if (now - lastViewTime < 5000) {
+                shouldIncrement = false;
+            }
+        }
+        
+        if (shouldIncrement) {
+            recentViews.set(viewKey, now);
+        }
+
+        const data = await getProductDetailBySlug(slug, shouldIncrement);
 
         if (!data) {
             return res.status(404).json({

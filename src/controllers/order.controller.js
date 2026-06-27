@@ -53,6 +53,7 @@ export const checkoutOrderController = async (req, res) => {
         const paymentMethod = normalizePaymentMethod(req.body?.paymentMethod);
         const productIds = req.body?.productIds;
         const directItem = req.body?.directItem;
+        const couponCode = req.body?.couponCode;
 
         if (paymentMethod === 'VNPAY') {
             const payment = await createVnpayPaymentFromCart({
@@ -62,6 +63,7 @@ export const checkoutOrderController = async (req, res) => {
                 bankCode: req.body?.bankCode,
                 productIds,
                 directItem,
+                couponCode,
             });
 
             return sendSuccessResponse(res, {
@@ -78,6 +80,7 @@ export const checkoutOrderController = async (req, res) => {
             shippingDistanceKm: req.body?.shippingDistanceKm ?? req.body?.shippingInfo?.shippingDistanceKm,
             productIds,
             directItem,
+            couponCode,
         });
 
         return sendSuccessResponse(res, {
