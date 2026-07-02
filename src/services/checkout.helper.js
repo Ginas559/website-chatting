@@ -1,6 +1,44 @@
 import mongoose from 'mongoose';
 import Cart from '../models/cart.model.js';
 import Product from '../models/product.model.js';
+import User from '../models/user.js';
+import Voucher from '../models/voucher.model.js';
+
+// Tien - Hoàn trả điểm tích lũy và voucher khi đơn hàng bị hủy
+export const refundOrderDiscounts = async ({ order, userId, session }) => {
+    if (order.pointsUsed && order.pointsUsed > 0) {
+        await User.updateOne(
+            { _id: userId },
+            { $inc: { rewardPoints: order.pointsUsed } },
+            { session }
+        );
+    }
+
+    if (order.couponCode) {
+        const cleanCouponCode = String(order.couponCode).trim().toUpperCase();
+        const user = await User.findById(userId).session(session);
+        if (user && Array.isArray(user.rewardCoupons)) {
+            const userCoupon = user.rewardCoupons.find(c => c.code === cleanCouponCode);
+            if (userCoupon) {
+                await User.updateOne(
+                    { _id: userId, 'rewardCoupons.code': cleanCouponCode },
+                    {
+                        $set: { 'rewardCoupons.$.isUsed': false },
+                        $unset: { 'rewardCoupons.$.usedAt': '' }
+                    },
+                    { session }
+                );
+                return;
+            }
+        }
+
+        const systemVoucher = await Voucher.findOne({ code: cleanCouponCode }).session(session);
+        if (systemVoucher) {
+            systemVoucher.usedCount = Math.max(0, systemVoucher.usedCount - 1);
+            await systemVoucher.save({ session });
+        }
+    }
+};
 
 export const SHIPPING_FEE = 0;
 
@@ -175,10 +213,18 @@ const normalizeSelectedProductIds = (selectedProductIds, createServiceError) => 
     return new Set(normalizedIds);
 };
 
-export const buildOrderDraftFromCart = async ({ userId, shippingInfo, selectedProductIds, session, createServiceError }) => {
+export const buildOrderDraftFromCart = async ({
+    userId,
+    shippingInfo,
+    selectedProductIds,
+    itemIds,
+    session,
+    createServiceError,
+}) => {
     ensureObjectId(userId, 'Người dùng', createServiceError);
+
     const normalizedShippingInfo = normalizeShippingInfo(shippingInfo, createServiceError);
-    const selectedProductIdSet = normalizeSelectedProductIds(selectedProductIds, createServiceError);
+    const selectedProductIdSet = normalizeSelectedProductIds(selectedProductIds ?? itemIds, createServiceError);
     const cart = await Cart.findOne({ user: userId }).session(session);
 
     if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
@@ -273,6 +319,11 @@ export const mapOrder = (order) => {
         shippingInfo: order.shippingInfo,
         subtotal: order.subtotal,
         shippingFee: order.shippingFee,
+        discountAmount: order.discountAmount || 0,
+        couponCode: order.couponCode || '',
+        couponDiscount: order.couponDiscount || 0,
+        pointsUsed: order.pointsUsed || 0,
+        pointsDiscount: order.pointsDiscount || 0,
         totalAmount: order.totalAmount,
         paymentMethod: order.paymentMethod,
         paymentStatus: order.paymentStatus,
