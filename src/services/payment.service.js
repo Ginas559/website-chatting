@@ -195,7 +195,17 @@ const buildVnpayPaymentUrl = ({ order, ipAddr, bankCode }) => {
     });
 };
 
-export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr, bankCode, couponCode, usePoints, pointsToUse, itemIds }) => {
+export const createVnpayPaymentFromCart = async ({
+    userId,
+    shippingInfo,
+    selectedProductIds,
+    ipAddr,
+    bankCode,
+    couponCode,
+    usePoints,
+    pointsToUse,
+    itemIds,
+}) => {
     const session = await mongoose.startSession();
 
     try {
@@ -205,7 +215,18 @@ export const createVnpayPaymentFromCart = async ({ userId, shippingInfo, ipAddr,
             const orderDraft = await buildOrderDraftFromCart({
                 userId,
                 shippingInfo,
+                selectedProductIds,
                 itemIds,
+                session,
+                createServiceError,
+            });
+
+            // ...
+        });
+    } finally {
+        session.endSession();
+    }
+}
                 session,
                 createServiceError,
             });

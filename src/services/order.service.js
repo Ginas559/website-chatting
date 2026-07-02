@@ -2,7 +2,15 @@ import crypto from 'crypto';
 import mongoose from 'mongoose';
 import Order from '../models/order.model.js';
 import User from '../models/user.js';
-import { applyStockForOrderItems, buildOrderDraftFromCart, clearCart, mapOrder, normalizeText, refundOrderDiscounts } from './checkout.helper.js';
+import {
+    applyStockForOrderItems,
+    buildOrderDraftFromCart,
+    clearCart,
+    clearOrderedItemsFromCart,
+    mapOrder,
+    normalizeText,
+    refundOrderDiscounts,
+} from './checkout.helper.js';
 import { createNotification } from '../utils/notification';
 import { recordDeliveredOrderRevenue } from './wallet.service';
 import { layKetQuaRuiRoAnToan } from './orderRisk.service';
@@ -440,7 +448,17 @@ const validateAdminNote = (note) => {
     return normalizedNote;
 };
 
-export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shippingDistanceKm, couponCode, usePoints, pointsToUse, itemIds }) => {
+export const checkoutOrder = async ({
+    userId,
+    shippingInfo,
+    paymentMethod,
+    selectedProductIds,
+    shippingDistanceKm,
+    couponCode,
+    usePoints,
+    pointsToUse,
+    itemIds,
+}) => {
     const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
     const session = await mongoose.startSession();
 
@@ -451,6 +469,7 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
             const orderDraft = await buildOrderDraftFromCart({
                 userId,
                 shippingInfo,
+                selectedProductIds,
                 itemIds,
                 session,
                 createServiceError,
