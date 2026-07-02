@@ -306,9 +306,13 @@ export const getAdminDeliveryQrController = async (req, res) => {
 
 export const verifyMyDeliveryQrController = async (req, res) => {
     try {
+        const roleId = req.user?.roleId;
+        const isStaff = ['R1', 'R3', 'R4'].includes(roleId);
+
         const result = await verifyMyDeliveryQr({
             userId: getUserIdFromRequest(req),
             qrContent: req.body?.qrContent,
+            isStaff,
         });
 
         return sendSuccessResponse(res, {

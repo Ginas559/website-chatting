@@ -963,7 +963,7 @@ export const getAdminDeliveryQr = async ({ orderIdOrCode }) => {
     return mapAdminDeliveryQr(order, decryptDeliveryToken(verification));
 };
 
-export const verifyMyDeliveryQr = async ({ userId, qrContent }) => {
+export const verifyMyDeliveryQr = async ({ userId, qrContent, isStaff = false }) => {
     if (!mongoose.isValidObjectId(userId)) {
         throw createServiceError(400, 'Người dùng không hợp lệ', 'INVALID_OBJECT_ID');
     }
@@ -978,7 +978,7 @@ export const verifyMyDeliveryQr = async ({ userId, qrContent }) => {
         throw createServiceError(404, 'Không thể xác minh kiện hàng. QR không hợp lệ, đã bị thay đổi hoặc đã bị vô hiệu hóa', 'DELIVERY_QR_NOT_FOUND');
     }
 
-    if (String(order.user) !== String(userId)) {
+    if (!isStaff && String(order.user) !== String(userId)) {
         throw createServiceError(403, 'QR không khớp với bất kỳ đơn hàng nào của tài khoản này', 'DELIVERY_QR_OWNER_MISMATCH');
     }
 
@@ -1004,26 +1004,48 @@ export const verifyMyDeliveryQr = async ({ userId, qrContent }) => {
         });
     }
 
+    const updateFields = {
+        'deliveryVerification.lastVerifiedAt': new Date(),
+    };
+
+    let statusChanged = false;
+    if (isStaff && order.status === 'SHIPPING') {
+        updateFields.status = 'DELIVERED';
+        updateFields.paymentStatus = 'PAID';
+        statusChanged = true;
+    }
+
     await Order.updateOne(
         { _id: order._id, 'deliveryVerification.tokenHash': tokenHash },
         {
-            $set: { 'deliveryVerification.lastVerifiedAt': new Date() },
+            $set: updateFields,
             $inc: { 'deliveryVerification.verificationCount': 1 },
+            ...(statusChanged ? {
+                $push: {
+                    statusHistory: {
+                        status: 'DELIVERED',
+                        note: 'Giao hàng thành công - Xác nhận qua QR bởi Shipper',
+                        changedAt: new Date(),
+                    },
+                },
+            } : {}),
         }
     );
+
+    const displayStatus = isStaff && order.status === 'SHIPPING' ? 'DELIVERED' : order.status;
 
     return {
         verificationLevel: isShipping ? 'VERIFIED' : 'REVIEW',
         message: isShipping
-            ? 'QR hợp lệ và kiện hàng khớp với đơn đang giao của bạn'
+            ? (isStaff ? 'QR hợp lệ · Đã xác nhận giao hàng thành công' : 'QR hợp lệ và kiện hàng khớp với đơn đang giao của bạn')
             : 'QR hợp lệ và đúng đơn của bạn, nhưng đơn đã được hệ thống ghi nhận là đã giao',
         order: {
             orderCode: order.orderCode,
             items: order.items,
             totalAmount: order.totalAmount,
             paymentMethod: order.paymentMethod,
-            paymentStatus: order.paymentStatus,
-            status: order.status,
+            paymentStatus: isStaff && order.status === 'SHIPPING' ? 'PAID' : order.paymentStatus,
+            status: displayStatus,
             shippingInfo: {
                 fullName: order.shippingInfo?.fullName || '',
                 maskedPhone: maskPhoneNumber(order.shippingInfo?.phone),
