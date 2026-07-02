@@ -56,6 +56,7 @@ export const checkoutOrderController = async (req, res) => {
             const payment = await createVnpayPaymentFromCart({
                 userId,
                 shippingInfo: req.body?.shippingInfo || req.body || {},
+                selectedProductIds: req.body?.selectedProductIds,
                 ipAddr: getClientIpFromRequest(req),
                 bankCode: req.body?.bankCode,
             });
@@ -71,6 +72,7 @@ export const checkoutOrderController = async (req, res) => {
             userId,
             shippingInfo: req.body?.shippingInfo || req.body || {},
             paymentMethod,
+            selectedProductIds: req.body?.selectedProductIds,
             shippingDistanceKm: req.body?.shippingDistanceKm ?? req.body?.shippingInfo?.shippingDistanceKm,
         });
 

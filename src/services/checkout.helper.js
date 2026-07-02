@@ -5,6 +5,43 @@ import Product from '../models/product.model.js';
 export const SHIPPING_FEE = 0;
 
 const PHONE_PATTERN = /^[0-9+\-\s()]{8,20}$/;
+const VIETNAM_PROVINCES = [
+    'An Giang',
+    'Bắc Ninh',
+    'Cà Mau',
+    'Cao Bằng',
+    'Cần Thơ',
+    'Đà Nẵng',
+    'Đắk Lắk',
+    'Điện Biên',
+    'Đồng Nai',
+    'Đồng Tháp',
+    'Gia Lai',
+    'Hà Nội',
+    'Hà Tĩnh',
+    'Hải Phòng',
+    'Hồ Chí Minh',
+    'Huế',
+    'Hưng Yên',
+    'Khánh Hòa',
+    'Lai Châu',
+    'Lâm Đồng',
+    'Lạng Sơn',
+    'Lào Cai',
+    'Nghệ An',
+    'Ninh Bình',
+    'Phú Thọ',
+    'Quảng Ngãi',
+    'Quảng Ninh',
+    'Quảng Trị',
+    'Sơn La',
+    'Tây Ninh',
+    'Thái Nguyên',
+    'Thanh Hóa',
+    'Tuyên Quang',
+    'Vĩnh Long',
+];
+const VIETNAM_PROVINCE_SET = new Set(VIETNAM_PROVINCES);
 
 export const normalizeText = (value) => String(value || '').trim();
 
@@ -33,8 +70,10 @@ export const normalizeShippingInfo = (payload = {}, createServiceError) => {
         throw createServiceError(400, 'Địa chỉ nhận hàng phải từ 8 đến 240 ký tự', 'INVALID_ADDRESS');
     }
 
-    if (city.length > 80) {
-        throw createServiceError(400, 'Tỉnh/thành phố không được vượt quá 80 ký tự', 'INVALID_CITY');
+    if (!VIETNAM_PROVINCE_SET.has(city)) {
+        throw createServiceError(400, 'Tỉnh/thành phố không hợp lệ', 'INVALID_CITY', {
+            validCities: VIETNAM_PROVINCES,
+        });
     }
 
     if (note.length > 300) {
@@ -117,16 +156,48 @@ const getProductsByCartItems = async (items, session) => {
     }));
 };
 
-export const buildOrderDraftFromCart = async ({ userId, shippingInfo, session, createServiceError }) => {
+const normalizeSelectedProductIds = (selectedProductIds, createServiceError) => {
+    if (selectedProductIds === undefined || selectedProductIds === null) {
+        return null;
+    }
+
+    if (!Array.isArray(selectedProductIds)) {
+        throw createServiceError(400, 'Danh sách sản phẩm thanh toán không hợp lệ', 'INVALID_SELECTED_PRODUCTS');
+    }
+
+    const normalizedIds = selectedProductIds.map((productId) => normalizeText(productId)).filter(Boolean);
+    if (!normalizedIds.length) {
+        throw createServiceError(400, 'Vui lòng chọn ít nhất một sản phẩm để thanh toán', 'EMPTY_SELECTED_PRODUCTS');
+    }
+
+    normalizedIds.forEach((productId) => ensureObjectId(productId, 'Sản phẩm thanh toán', createServiceError));
+
+    return new Set(normalizedIds);
+};
+
+export const buildOrderDraftFromCart = async ({ userId, shippingInfo, selectedProductIds, session, createServiceError }) => {
     ensureObjectId(userId, 'Người dùng', createServiceError);
     const normalizedShippingInfo = normalizeShippingInfo(shippingInfo, createServiceError);
+    const selectedProductIdSet = normalizeSelectedProductIds(selectedProductIds, createServiceError);
     const cart = await Cart.findOne({ user: userId }).session(session);
 
     if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
         throw createServiceError(400, 'Giỏ hàng đang trống, không thể thanh toán', 'EMPTY_CART');
     }
 
-    const entries = await getProductsByCartItems(cart.items, session);
+    const checkoutItems = selectedProductIdSet
+        ? cart.items.filter((item) => selectedProductIdSet.has(getCartItemProductId(item)))
+        : cart.items;
+
+    if (!checkoutItems.length) {
+        throw createServiceError(400, 'Các sản phẩm đã chọn không còn trong giỏ hàng', 'SELECTED_PRODUCTS_NOT_IN_CART');
+    }
+
+    if (selectedProductIdSet && checkoutItems.length !== selectedProductIdSet.size) {
+        throw createServiceError(400, 'Một số sản phẩm đã chọn không còn trong giỏ hàng', 'SELECTED_PRODUCTS_NOT_IN_CART');
+    }
+
+    const entries = await getProductsByCartItems(checkoutItems, session);
     entries.forEach(({ cartItem, product }) => assertProductCanCheckout(cartItem, product, createServiceError));
 
     const orderItems = entries.map(({ cartItem, product }) => mapOrderItem(cartItem, product));

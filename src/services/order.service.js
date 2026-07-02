@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import mongoose from 'mongoose';
 import Order from '../models/order.model.js';
 import User from '../models/user';
-import { applyStockForOrderItems, buildOrderDraftFromCart, clearCart, mapOrder, normalizeText } from './checkout.helper.js';
+import { applyStockForOrderItems, buildOrderDraftFromCart, clearOrderedItemsFromCart, mapOrder, normalizeText } from './checkout.helper.js';
 import { createNotification } from '../utils/notification';
 import { recordDeliveredOrderRevenue } from './wallet.service';
 import { layKetQuaRuiRoAnToan } from './orderRisk.service';
@@ -434,7 +434,7 @@ const validateAdminNote = (note) => {
     return normalizedNote;
 };
 
-export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shippingDistanceKm }) => {
+export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, selectedProductIds, shippingDistanceKm }) => {
     const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
     const session = await mongoose.startSession();
 
@@ -445,6 +445,7 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
             const orderDraft = await buildOrderDraftFromCart({
                 userId,
                 shippingInfo,
+                selectedProductIds,
                 session,
                 createServiceError,
             });
@@ -481,7 +482,7 @@ export const checkoutOrder = async ({ userId, shippingInfo, paymentMethod, shipp
                 { session }
             );
 
-            await clearCart(orderDraft.cart, session);
+            await clearOrderedItemsFromCart(userId, orderDraft.orderItems, session);
             createdOrder = order;
         });
 
