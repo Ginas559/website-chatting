@@ -9,8 +9,8 @@ const roleLabels = {
 };
 
 const getManageableRoles = (actorRoleId) => {
-    if (actorRoleId === 'R1') return ['R3', 'R4'];
-    if (actorRoleId === 'R3') return ['R4'];
+    if (actorRoleId === 'R1') return ['R2', 'R3', 'R4'];
+    if (actorRoleId === 'R3') return ['R2', 'R4'];
     return [];
 };
 
@@ -44,7 +44,7 @@ const listUsers = async (actor = {}) => {
 
         return {
             errCode: 0,
-            errMessage: 'Lấy danh sách tài khoản nội bộ thành công',
+            errMessage: 'Lấy danh sách tài khoản thành công',
             users: users.map((user) => sanitizeUser(user))
         };
     } catch (error) {
@@ -56,7 +56,7 @@ const listUsers = async (actor = {}) => {
 const createUser = async (payload, actor = {}) => {
     try {
         const email = String(payload.email || '').toLowerCase().trim();
-        const roleId = payload.roleId || (actor.roleId === 'R3' ? 'R4' : 'R3');
+        const roleId = payload.roleId || 'R2';
 
         if (!canManageRole(actor.roleId, roleId)) {
             return forbidden(`${roleLabels[actor.roleId] || 'Tài khoản hiện tại'} không thể tạo ${roleLabels[roleId] || 'role này'}`);
@@ -138,7 +138,7 @@ const updateUser = async (userId, payload, actor = {}) => {
 
         return {
             errCode: 0,
-            errMessage: 'Cập nhật tài khoản nội bộ thành công',
+            errMessage: 'Cập nhật tài khoản thành công',
             user: sanitizeUser(user)
         };
     } catch (error) {
@@ -166,7 +166,7 @@ const deleteUser = async (userId, actor = {}) => {
 
         return {
             errCode: 0,
-            errMessage: 'Xóa tài khoản nội bộ thành công',
+            errMessage: 'Xóa tài khoản thành công',
             user: sanitizeUser(deletedUser)
         };
     } catch (error) {
@@ -195,7 +195,7 @@ const resetUserPassword = async (userId, newPassword, actor = {}) => {
 
         return {
             errCode: 0,
-            errMessage: 'Reset mật khẩu tài khoản cấp dưới thành công',
+            errMessage: 'Reset mật khẩu tài khoản thành công',
             user: sanitizeUser(user)
         };
     } catch (error) {
