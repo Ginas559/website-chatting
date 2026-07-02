@@ -221,16 +221,6 @@ export const createVnpayPaymentFromCart = async ({
                 createServiceError,
             });
 
-            // ...
-        });
-    } finally {
-        session.endSession();
-    }
-}
-                session,
-                createServiceError,
-            });
-
             const subtotal = orderDraft.subtotal;
             const shippingFee = orderDraft.shippingFee;
             let couponDiscount = 0;
