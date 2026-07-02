@@ -13,7 +13,7 @@ const initOrderRoutes = (app) => {
     router.get('/api/admin/orders/:orderIdOrCode/delivery-qr', authenticateToken, authorizeRoles('R1', 'R3'), orderController.getAdminDeliveryQrController);
     router.post('/api/admin/orders/:orderIdOrCode/delivery-qr', authenticateToken, authorizeRoles('R1', 'R3'), createDeliveryQrLimiter, orderController.createAdminDeliveryQrController);
 
-    router.post('/api/orders/delivery/verify', authenticateToken, authorizeUser, verifyDeliveryQrLimiter, orderController.verifyMyDeliveryQrController);
+    router.post('/api/orders/delivery/verify', authenticateToken, authorizeRoles('R2', 'R4'), verifyDeliveryQrLimiter, orderController.verifyMyDeliveryQrController);
     router.get('/api/orders/my', authenticateToken, authorizeUser, orderController.getMyOrdersController);
     router.get('/api/orders/my/:orderIdOrCode', authenticateToken, authorizeUser, orderController.getMyOrderDetailController);
     router.patch('/api/orders/my/:orderIdOrCode/cancel', authenticateToken, authorizeUser, orderController.cancelMyOrderController);

@@ -1251,7 +1251,7 @@ export const getAdminDeliveryQr = async ({ orderIdOrCode }) => {
     return mapAdminDeliveryQr(order, decryptDeliveryToken(verification));
 };
 
-export const verifyMyDeliveryQr = async ({ userId, qrContent }) => {
+export const verifyMyDeliveryQr = async ({ userId, roleId, qrContent }) => {
     if (!mongoose.isValidObjectId(userId)) {
         throw createServiceError(400, 'Người dùng không hợp lệ', 'INVALID_OBJECT_ID');
     }
@@ -1266,7 +1266,8 @@ export const verifyMyDeliveryQr = async ({ userId, qrContent }) => {
         throw createServiceError(404, 'Không thể xác minh kiện hàng. QR không hợp lệ, đã bị thay đổi hoặc đã bị vô hiệu hóa', 'DELIVERY_QR_NOT_FOUND');
     }
 
-    if (String(order.user) !== String(userId)) {
+    const isShipper = roleId === 'R4';
+    if (!isShipper && String(order.user) !== String(userId)) {
         throw createServiceError(403, 'QR không khớp với bất kỳ đơn hàng nào của tài khoản này', 'DELIVERY_QR_OWNER_MISMATCH');
     }
 
@@ -1303,8 +1304,8 @@ export const verifyMyDeliveryQr = async ({ userId, qrContent }) => {
     return {
         verificationLevel: isShipping ? 'VERIFIED' : 'REVIEW',
         message: isShipping
-            ? 'QR hợp lệ và kiện hàng khớp với đơn đang giao của bạn'
-            : 'QR hợp lệ và đúng đơn của bạn, nhưng đơn đã được hệ thống ghi nhận là đã giao',
+            ? (isShipper ? 'QR hợp lệ và kiện hàng đang ở trạng thái giao hàng' : 'QR hợp lệ và kiện hàng khớp với đơn đang giao của bạn')
+            : (isShipper ? 'QR hợp lệ, nhưng đơn đã được hệ thống ghi nhận là đã giao' : 'QR hợp lệ và đúng đơn của bạn, nhưng đơn đã được hệ thống ghi nhận là đã giao'),
         order: {
             orderCode: order.orderCode,
             items: order.items,

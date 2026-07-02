@@ -329,6 +329,7 @@ export const verifyMyDeliveryQrController = async (req, res) => {
     try {
         const result = await verifyMyDeliveryQr({
             userId: getUserIdFromRequest(req),
+            roleId: req.user?.roleId,
             qrContent: req.body?.qrContent,
         });
 
