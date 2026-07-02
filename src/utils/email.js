@@ -28,7 +28,7 @@ export const sendOTPEmail = async (email, otp, purpose = 'register') => {
     const content = getOTPEmailContent(otp, purpose);
 
     const mailOptions = {
-        from: `"Hệ thống Chat App" <${process.env.EMAIL_USER}>`,
+        from: `"SmartZone - Web bán hàng công nghệ" <${process.env.EMAIL_USER}>`,
         to: email,
         subject: content.subject,
         html: `
