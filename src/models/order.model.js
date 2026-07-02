@@ -116,6 +116,13 @@ const orderSchema = new mongoose.Schema(
         },
         subtotal: { type: Number, required: true, min: 0 },
         shippingFee: { type: Number, default: 0, min: 0 },
+        // Tien - Các trường lưu thông tin giảm giá của đơn hàng
+        discountAmount: { type: Number, default: 0, min: 0 },
+        couponCode: { type: String, default: '', trim: true },
+        couponDiscount: { type: Number, default: 0, min: 0 },
+        pointsUsed: { type: Number, default: 0, min: 0 },
+        pointsDiscount: { type: Number, default: 0, min: 0 },
+        ///////
         totalAmount: { type: Number, required: true, min: 0 },
         paymentMethod: {
             type: String,

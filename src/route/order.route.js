@@ -19,6 +19,9 @@ const initOrderRoutes = (app) => {
     router.patch('/api/orders/my/:orderIdOrCode/cancel', authenticateToken, authorizeUser, orderController.cancelMyOrderController);
     router.post('/api/orders/my/:orderIdOrCode/pay', authenticateToken, authorizeUser, orderController.repayVnpayOrderController);
     router.post('/api/orders/checkout', authenticateToken, authorizeUser, orderController.checkoutOrderController);
+    // Tien - Định nghĩa route cho tính toán thử tiền giảm giá trước khi checkout
+    router.post('/api/orders/checkout/preview', authenticateToken, authorizeUser, orderController.previewCheckoutController);
+    ///////
 
     return app.use('/', router);
 };
