@@ -85,11 +85,16 @@ let initWebRoutes = (app) => {
     initLoyaltyRoutes(app);
     initChatRoutes(app);
 
-    router.get('/admin/users', authenticateToken, authorizeRoles('R1', 'R3'), userManagementController.listUsers);
-    router.post('/admin/users', authenticateToken, authorizeRoles('R1', 'R3'), createUserValidator, userManagementController.createUser);
-    router.put('/admin/users/:id', authenticateToken, authorizeRoles('R1', 'R3'), updateUserValidator, userManagementController.updateUser);
-    router.patch('/admin/users/:id/reset-password', authenticateToken, authorizeRoles('R1', 'R3'), resetUserPasswordValidator, userManagementController.resetUserPassword);
-    router.delete('/admin/users/:id', authenticateToken, authorizeRoles('R1', 'R3'), deleteUserValidator, userManagementController.deleteUser);
+    const userManagementRoutes = [
+        ['/api/admin/users', '/admin/users'],
+        ['/api/admin/users/:id', '/admin/users/:id'],
+        ['/api/admin/users/:id/reset-password', '/admin/users/:id/reset-password'],
+    ];
+    router.get(userManagementRoutes[0], authenticateToken, authorizeRoles('R1', 'R3'), userManagementController.listUsers);
+    router.post(userManagementRoutes[0], authenticateToken, authorizeRoles('R1', 'R3'), createUserValidator, userManagementController.createUser);
+    router.put(userManagementRoutes[1], authenticateToken, authorizeRoles('R1', 'R3'), updateUserValidator, userManagementController.updateUser);
+    router.patch(userManagementRoutes[2], authenticateToken, authorizeRoles('R1', 'R3'), resetUserPasswordValidator, userManagementController.resetUserPassword);
+    router.delete(userManagementRoutes[1], authenticateToken, authorizeRoles('R1', 'R3'), deleteUserValidator, userManagementController.deleteUser);
 
     router.post('/api/admin/vouchers', authenticateToken, authorizeRoles('R1', 'R3'), voucherController.createVoucherController);
     router.get('/api/admin/vouchers', authenticateToken, authorizeRoles('R1', 'R3'), voucherController.getVouchersAdminController);
