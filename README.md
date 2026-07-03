@@ -1,99 +1,239 @@
-# Ecommerce Management System - Backend API
+# Website Chatting - Backend API
 
-Backend Node.js/Express cho he thong thuong mai dien tu cua nhom. Service nay cung cap REST API, ket noi MongoDB, xu ly xac thuc JWT/OTP, gio hang, dat hang, thanh toan VNPAY, voucher, loyalty, review, dashboard quan tri, chat realtime, livestream va QR xac minh giao hang.
+Đây là backend chính của hệ thống thương mại điện tử `website-chatting`. Service này cung cấp REST API, xác thực JWT, phân quyền theo vai trò, kết nối MongoDB, xử lý giỏ hàng/đơn hàng/thanh toán, quản trị sản phẩm, voucher, dashboard, chat realtime, livestream, kiểm duyệt live chat, QR xác minh giao hàng và tích hợp AI risk service.
 
-## Vai tro trong he thong
+Backend được dùng chung bởi:
 
-Repo nay la lop server dung chung cho:
+- `website-chatting-FE`: giao diện khách hàng.
+- `website-chatting-ADMIN`: cổng admin/manager/shipper.
+- `ai-risk-service`: service AI đánh giá rủi ro đơn hàng hoặc kiểm duyệt nội dung, gọi qua URL cấu hình trong `.env`.
 
-- `website-chatting-FE`: giao dien khach hang.
-- `website-chatting-ADMIN`: giao dien admin/manager/shipper.
-- `ai-risk-service`: dich vu AI tinh rui ro don hang, duoc goi thong qua bien moi truong `AI_RISK_SERVICE_URL`.
-
-Mac dinh backend chay tai `http://localhost:8088`, cac API chinh nam duoi prefix `/api`, rieng mot so route profile/admin cu giu dang `/user/profile`, `/admin/profile`, `/admin/users`.
-
-## Cong nghe chinh
-
-- Node.js + Express 5.
-- MongoDB + Mongoose.
-- JWT access token, refresh token va role-based authorization.
-- Socket.io cho chat, thong bao realtime va livestream.
-- Nodemailer cho OTP/email.
-- VNPAY SDK cho thanh toan online.
-- Express Validator va rate limit cho validation/chong spam.
-- Mocha, Chai, Supertest cho test backend.
-- Babel Node/Nodemon cho moi truong dev.
-
-## Chuc nang noi bat
-
-- Dang ky tai khoan, xac thuc OTP, dang nhap, dang xuat, refresh token.
-- Quen mat khau, dat lai mat khau, doi mat khau.
-- Phan quyen theo role:
-  - `R1`: Admin.
-  - `R2`: Customer/User.
-  - `R3`: Manager.
-  - `R4`: Shipper.
-- Quan ly user, profile, dashboard, settings.
-- Quan ly san pham, danh muc, san pham yeu thich, san pham da xem gan day.
-- Gio hang, checkout, huy don, cap nhat trang thai don hang.
-- Thanh toan COD va VNPAY, retry thanh toan, callback VNPAY return.
-- Voucher, diem tich luy, wallet transaction va preview gia tri checkout.
-- Review san pham va ma khuyen mai sau danh gia.
-- QR giao hang cho shipper xac minh don.
-- Chat ho tro khach hang, lich su chat, thong bao realtime.
-- Livestream ban hang, live chat va moderation.
-- Tich hop AI risk service de danh gia rui ro don COD.
-
-## Cau truc thu muc
+Mặc định backend chạy tại:
 
 ```text
-src/
-  config/        Ket noi MongoDB va cau hinh Socket.io
-  controllers/   Xu ly request/response cho tung domain
-  middleware/    Auth, role guard, validator, rate limit
-  models/        Mongoose models
-  route/         Khai bao REST routes
-  seed/          Seed du lieu ban dau
-  services/      Business logic
-  sockets/       Socket.io handlers cho chat/livestream
-  utils/         JWT, email, notification, response helper
-  validators/    Validator rieng cho profile
-scripts/         Script smoke test va migrate
-postman/         Postman collections theo cac module test
+http://localhost:8088
 ```
 
-## Yeu cau truoc khi chay
+API nghiệp vụ chính nằm dưới prefix:
 
-- Node.js 18+.
+```text
+/api
+```
+
+Một số route profile cũ vẫn giữ dạng:
+
+```text
+/user/profile
+/admin/profile
+/manager/profile
+/shipper/profile
+```
+
+## 1. Công Nghệ Sử Dụng
+
+- Node.js.
+- Express 5.
+- MongoDB và Mongoose.
+- JWT access token, refresh token và token tạm cho OTP/reset password.
+- BcryptJS để hash mật khẩu.
+- Socket.io cho notification, chat và livestream realtime.
+- Nodemailer để gửi OTP/email.
+- VNPAY SDK cho thanh toán online.
+- Express Validator để validate request.
+- Express Rate Limit để chống spam ở các API nhạy cảm.
+- Axios để gọi service ngoài, ví dụ AI risk service.
+- Babel Node và Nodemon cho môi trường phát triển.
+- Mocha, Chai, Supertest cho test backend theo script cấu hình.
+
+## 2. Vai Trò Trong Hệ Thống
+
+| Role | Tên | Repo sử dụng chính | Quyền chính |
+| --- | --- | --- | --- |
+| `R1` | Admin | `website-chatting-ADMIN` | Toàn quyền quản trị |
+| `R2` | Customer/User | `website-chatting-FE` | Mua hàng, chat, xem live, review |
+| `R3` | Manager | `website-chatting-ADMIN` | Quản lý nghiệp vụ theo quyền backend |
+| `R4` | Shipper | `website-chatting-ADMIN` | Xác minh giao hàng bằng QR |
+
+Middleware phân quyền chính nằm ở:
+
+```text
+src/middleware/loginMiddleware.js
+```
+
+## 3. Chức Năng Chính
+
+### Xác thực và tài khoản
+
+- Đăng ký tài khoản.
+- Gửi và xác thực OTP.
+- Đăng nhập.
+- Đăng xuất.
+- Refresh access token.
+- Quên mật khẩu.
+- Đặt lại mật khẩu.
+- Đổi mật khẩu.
+- Lấy hồ sơ theo role: customer, admin, manager, shipper.
+
+### Sản phẩm và bài viết
+
+- Trang chủ sản phẩm.
+- Tìm kiếm sản phẩm.
+- Lọc theo danh mục, giá, trạng thái.
+- Xem chi tiết sản phẩm theo slug.
+- Sản phẩm bán chạy, xem nhiều.
+- Sản phẩm yêu thích.
+- Sản phẩm đã xem gần đây.
+- Admin/manager thêm, sửa, ẩn/xóa sản phẩm theo quyền.
+- Bài viết trang chủ và chi tiết bài viết.
+- Admin tạo bài viết.
+
+### Giỏ hàng, đơn hàng và thanh toán
+
+- Xem giỏ hàng hiện tại.
+- Thêm sản phẩm vào giỏ.
+- Cập nhật số lượng.
+- Xóa sản phẩm hoặc xóa toàn bộ giỏ.
+- Preview checkout, tính voucher/giảm giá trước khi đặt.
+- Đặt hàng.
+- Thanh toán COD.
+- Thanh toán VNPAY.
+- VNPAY return và IPN.
+- Thanh toán lại đơn VNPAY.
+- Xem đơn hàng của khách.
+- Hủy đơn hoặc gửi yêu cầu hủy.
+- Admin/manager xem danh sách đơn, chi tiết đơn, cập nhật trạng thái.
+- Tạo QR giao hàng.
+- Shipper/customer xác minh giao hàng bằng QR.
+
+### Voucher, loyalty và ví giao dịch
+
+- Admin/manager tạo, xem, sửa, xóa voucher.
+- Khách hàng xem voucher khả dụng.
+- Tính điểm loyalty.
+- Lưu lịch sử wallet transaction.
+
+### Review và thông báo
+
+- Khách hàng xem review sản phẩm.
+- Khách hàng tạo review.
+- Backend tạo notification cho các sự kiện quan trọng.
+- API lấy danh sách notification.
+- Đánh dấu đã đọc một notification hoặc tất cả.
+- Socket.io đẩy notification realtime.
+
+### Chat, livestream và kiểm duyệt
+
+- Chat hỗ trợ giữa khách hàng và staff.
+- Lấy lịch sử chat.
+- Lấy danh sách contact chat.
+- Đánh dấu tin nhắn đã đọc.
+- Admin bắt đầu/kết thúc livestream.
+- Người dùng/nhân viên xem livestream.
+- Live chat trong livestream.
+- Xóa/ghim tin nhắn live chat.
+- Cảnh cáo/cấm người dùng trong live chat.
+- Xem danh sách ban và xử lý yêu cầu mở cấm.
+
+### AI risk service
+
+- Gọi AI service qua `AI_RISK_SERVICE_URL` hoặc `AI_SERVICE_URL`.
+- Có timeout qua `AI_RISK_TIMEOUT_MS`.
+- Có chế độ `RISK_ENGINE_MODE`, ví dụ `AI_FIRST`.
+- Nếu service AI không chạy, backend vẫn cần được cấu hình phù hợp để tránh ảnh hưởng demo các phần không dùng AI.
+
+## 4. Cấu Trúc Thư Mục
+
+```text
+website-chatting/
+  src/
+    config/          Kết nối MongoDB và cấu hình Socket.io
+    controllers/     Controller xử lý request/response
+    middleware/      Auth, role guard, validator, rate limit
+    models/          Mongoose models
+    route/           Khai báo REST routes
+    seed/            Seed admin và import bài viết ban đầu
+    services/        Business logic
+    sockets/         Socket.io handlers cho chat/livestream
+    utils/           JWT, email, notification, response helper
+    validators/      Validator riêng cho profile
+  scripts/           Smoke test và script migrate
+  postman/           Postman collections hỗ trợ kiểm thử
+  package.json
+  .env.example
+```
+
+Các model chính:
+
+```text
+user.js
+product.model.js
+cart.model.js
+order.model.js
+voucher.model.js
+review.model.js
+notification.model.js
+chatMessage.model.js
+livestream.model.js
+liveChatMessage.model.js
+liveChatModerationCase.model.js
+liveChatUnbanRequest.model.js
+systemSetting.model.js
+walletTransaction.model.js
+otp.model.js
+refreshToken.model.js
+article.model.js
+```
+
+## 5. Yêu Cầu Trước Khi Chạy
+
+- Node.js 18 trở lên.
 - npm.
-- MongoDB local hoac MongoDB Atlas.
-- Tai khoan email app password neu can gui OTP.
-- VNPAY sandbox credentials neu test thanh toan online.
-- Neu test AI risk: chay them service AI o `http://localhost:8000`.
+- MongoDB local hoặc MongoDB Atlas.
+- Tài khoản email/app password nếu cần gửi OTP.
+- VNPAY sandbox credentials nếu test thanh toán VNPAY.
+- `ai-risk-service` nếu muốn test phần AI.
 
-## Cai dat
+Kiểm tra Node/npm:
 
 ```bash
+node -v
+npm -v
+```
+
+## 6. Cài Đặt
+
+Từ thư mục chứa toàn bộ đồ án:
+
+```bash
+cd website-chatting
 npm install
 ```
 
-Tao file `.env` tu `.env.example`:
+## 7. Cấu Hình `.env`
+
+Repo có file `.env.example`. Tạo file `.env`:
 
 ```bash
 cp .env.example .env
 ```
 
-Vi du cau hinh toi thieu:
+Nếu dùng PowerShell trên Windows:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Cấu hình tối thiểu để chạy local:
 
 ```env
 NODE_ENV=development
 PORT=8088
 SEED_INITIAL_DATA=true
-MONGO_DB_URL=mongodb://127.0.0.1:27017/ecommerce-management
-JWT_SECRET=your_access_secret
+MONGO_DB_URL=mongodb://127.0.0.1:27017/website-chatting
+JWT_SECRET=your_access_token_secret
 JWT_EXPIRE=1h
-JWT_TEMP_SECRET=your_temp_secret
-JWT_REFRESH_SECRET=your_refresh_secret
+JWT_TEMP_SECRET=your_temp_token_secret
+JWT_REFRESH_SECRET=your_refresh_token_secret
 EMAIL_USER=your_email@gmail.com
 EMAIL_PASS=your_app_password
 ADMIN_EMAIL=admin@example.com
@@ -102,163 +242,499 @@ AI_RISK_SERVICE_URL=http://localhost:8000
 AI_RISK_TIMEOUT_MS=5000
 RISK_ENGINE_MODE=AI_FIRST
 AI_SERVICE_URL=http://localhost:8000
+DELIVERY_QR_ENCRYPTION_SECRET=your_delivery_qr_secret
 ```
 
-`SEED_INITIAL_DATA=true` se seed du lieu khoi tao khi server ket noi MongoDB thanh cong. Sau lan dau co the doi ve `false` de tranh seed lai.
+Ý nghĩa các biến quan trọng:
 
-## Chay local
+| Biến | Ý nghĩa |
+| --- | --- |
+| `NODE_ENV` | Môi trường chạy, thường là `development` khi làm local |
+| `PORT` | Port backend, mặc định nên dùng `8088` |
+| `SEED_INITIAL_DATA` | `true` để seed admin/bài viết ban đầu khi kết nối DB |
+| `MONGO_DB_URL` | MongoDB connection string chính |
+| `MONGO_URI` | Một số đoạn code có hỗ trợ tên biến này, có thể dùng dự phòng |
+| `JWT_SECRET` | Secret ký access token |
+| `JWT_EXPIRE` | Thời hạn access token |
+| `JWT_TEMP_SECRET` | Secret cho token tạm OTP/reset password |
+| `JWT_REFRESH_SECRET` | Secret ký refresh token |
+| `EMAIL_USER` | Email gửi OTP |
+| `EMAIL_PASS` | App password của email |
+| `ADMIN_EMAIL` | Email admin seed ban đầu |
+| `ADMIN_PASSWORD` | Mật khẩu admin seed ban đầu |
+| `AI_RISK_SERVICE_URL` | URL service AI risk |
+| `AI_RISK_TIMEOUT_MS` | Timeout khi gọi AI service |
+| `RISK_ENGINE_MODE` | Chế độ đánh giá risk |
+| `AI_SERVICE_URL` | URL service AI dùng ở các module khác nếu có |
+| `DELIVERY_QR_ENCRYPTION_SECRET` | Secret mã hóa/xác thực QR giao hàng |
+
+Lưu ý:
+
+- Không nên commit file `.env`.
+- Sau lần seed đầu tiên, nên đổi `SEED_INITIAL_DATA=false` để tránh seed lại không cần thiết.
+- Nếu đổi `JWT_SECRET` hoặc `JWT_REFRESH_SECRET`, token cũ trong frontend/admin sẽ mất hiệu lực.
+
+## 8. Chạy Backend
 
 ```bash
+cd website-chatting
 npm start
 ```
 
-Server se:
+Script này chạy:
 
-1. Load bien moi truong tu `.env`.
-2. Ket noi MongoDB.
-3. Seed du lieu neu `SEED_INITIAL_DATA=true`.
-4. Ket thuc cac phien livestream cu neu co.
-5. Dang ky REST routes va Socket.io.
-6. Lang nghe tai `http://localhost:8088`.
+```bash
+nodemon --exec babel-node src/server.js
+```
 
-Kiem tra nhanh:
+Khi chạy thành công, backend sẽ:
+
+1. Load biến môi trường từ `.env`.
+2. Kết nối MongoDB.
+3. Seed dữ liệu ban đầu nếu `SEED_INITIAL_DATA=true`.
+4. Kết thúc các livestream cũ nếu cần.
+5. Đăng ký REST routes.
+6. Khởi tạo Socket.io.
+7. Lắng nghe tại `http://localhost:8088`.
+
+Kiểm tra nhanh:
 
 ```bash
 curl http://localhost:8088/
 ```
 
-Ket qua mong doi:
+Kết quả mong đợi:
 
 ```json
 { "message": "Backend API is running" }
 ```
 
-## Scripts
+## 9. Chạy Cả Hệ Thống Để Demo
+
+Mở 3 terminal:
+
+```bash
+# Terminal 1: backend
+cd website-chatting
+npm start
+```
+
+```bash
+# Terminal 2: frontend khách hàng
+cd website-chatting-FE
+npm run dev
+```
+
+```bash
+# Terminal 3: admin/staff portal
+cd website-chatting-ADMIN
+npm run dev
+```
+
+Các URL:
+
+```text
+Backend:  http://localhost:8088
+Customer: http://localhost:5173
+Admin:    http://localhost:5174
+```
+
+## 10. Scripts Trong `package.json`
 
 ```bash
 npm start
 ```
 
-Chay server dev bang `nodemon --exec babel-node src/server.js`.
+Chạy backend dev bằng Nodemon và Babel Node.
 
 ```bash
 npm test
 ```
 
-Chay test Mocha trong `test/**/*.test.js`.
+Chạy Mocha theo pattern `test/**/*.test.js`. Hiện tại repo chưa có thư mục `test/`, nên script này chỉ hữu ích khi nhóm bổ sung test backend.
 
 ```bash
 npm run test:delivery-qr
 ```
 
-Smoke test luong xac minh giao hang bang QR.
+Chạy smoke test luồng xác minh giao hàng bằng QR:
+
+```text
+scripts/deliveryVerification.smoke.js
+```
 
 ```bash
 npm run test:chat
 ```
 
-Smoke test luong chat realtime.
+Chạy smoke test luồng chat realtime:
+
+```text
+scripts/chatVerification.smoke.js
+```
 
 ```bash
 npm run migrate:delivery-qr
 ```
 
-Migrate du lieu QR giao hang cu.
+Chạy script migrate dữ liệu QR giao hàng cũ:
 
-## API tong quan
-
-Auth:
-
-- `POST /api/register`
-- `POST /api/verify-otp`
-- `POST /api/login`
-- `POST /api/refresh-token`
-- `POST /api/logout`
-- `POST /api/forgot-password`
-- `POST /api/reset-password`
-- `PATCH /api/me/password`
-
-Customer:
-
-- `GET /api/products/home`
-- `GET /api/products`
-- `GET /api/products/:slug`
-- `GET /api/products/categories`
-- `POST /api/products/:productId/favorite`
-- `GET /api/cart`
-- `POST /api/orders/checkout`
-- `POST /api/orders/checkout/preview`
-- `GET /api/orders/my`
-- `PATCH /api/orders/my/:orderIdOrCode/cancel`
-- `GET /api/payments/vnpay-return`
-- `GET /api/vouchers/my`
-- `GET /api/loyalty/me`
-- `GET /api/notifications`
-
-Admin/manager/shipper:
-
-- `GET /api/admin/dashboard/overview`
-- `GET /api/admin/dashboard/revenue`
-- `GET /api/admin/dashboard/order-status`
-- `GET /api/admin/dashboard/top-products`
-- `GET /api/admin/dashboard/recent-orders`
-- `GET /api/admin/settings`
-- `PATCH /api/admin/settings`
-- `GET /admin/users`
-- `POST /admin/users`
-- `PUT /admin/users/:id`
-- `PATCH /admin/users/:id/reset-password`
-- `DELETE /admin/users/:id`
-- `GET /api/admin/vouchers`
-- `POST /api/admin/vouchers`
-- `PUT /api/admin/vouchers/:id`
-- `DELETE /api/admin/vouchers/:id`
-- `POST /api/orders/delivery/verify`
-
-Realtime:
-
-- Socket.io duoc khoi tao tren cung HTTP server.
-- Client co the join room theo `user:{userId}` hoac `role:{roleId}` thong qua event `join`.
-- Cac module chat, notification va livestream dung Socket.io de cap nhat giao dien tuc thoi.
-
-## Ket noi voi frontend
-
-- Customer frontend mac dinh goi backend qua `VITE_BACKEND_URL=http://localhost:8088/api`.
-- Admin frontend cung dung backend nay va thuong chay port `5174`.
-- CORS da mo cho `localhost:5173`, `localhost:5174`, `localhost:3000` va cac bien the `127.0.0.1`.
-
-Thu tu chay de test day du:
-
-```bash
-# Terminal 1
-cd website-chatting
-npm start
-
-# Terminal 2
-cd website-chatting-FE
-npm run dev
-
-# Terminal 3
-cd website-chatting-ADMIN
-npm run dev
+```text
+scripts/migrateLegacyDeliveryQr.js
 ```
 
-## Postman
+## 11. API Tổng Quan
 
-Thu muc `postman/` co cac collection ho tro kiem thu:
+### Auth
 
-- Register.
-- Login.
-- Forgot password.
-- Edit profile.
+| Method | Endpoint | Mô tả |
+| --- | --- | --- |
+| `POST` | `/api/register` | Đăng ký và gửi OTP |
+| `POST` | `/api/verify-otp` | Xác thực OTP |
+| `POST` | `/api/login` | Đăng nhập |
+| `POST` | `/api/refresh-token` | Làm mới access token |
+| `POST` | `/api/logout` | Đăng xuất |
+| `POST` | `/api/forgot-password` | Gửi yêu cầu quên mật khẩu |
+| `POST` | `/api/reset-password` | Đặt lại mật khẩu |
+| `PATCH` | `/api/me/password` | Đổi mật khẩu |
 
-Co the import vao Postman va cau hinh bien base URL la `http://localhost:8088`.
+### Profile
 
-## Luu y phat trien
+| Method | Endpoint | Role |
+| --- | --- | --- |
+| `GET` | `/user/profile` | `R2` |
+| `GET` | `/admin/profile` | `R1` |
+| `GET` | `/manager/profile` | `R3` |
+| `GET` | `/shipper/profile` | `R4` |
 
-- Khong commit file `.env`.
-- Doi secret JWT/email/VNPAY khi deploy.
-- Neu doi port backend, cap nhat lai `VITE_BACKEND_URL` trong hai repo frontend.
-- Neu sua API auth, can kiem tra interceptor refresh token o frontend/admin.
-- Neu sua order/payment, nen test ca COD, VNPAY return va retry payment.
-- Neu sua chat/livestream, can test ca REST API lan Socket.io event.
+### Sản phẩm
+
+| Method | Endpoint | Mô tả |
+| --- | --- | --- |
+| `GET` | `/api/products/home` | Sản phẩm trang chủ |
+| `GET` | `/api/products` | Tìm kiếm/lọc sản phẩm |
+| `GET` | `/api/products/:slug` | Chi tiết sản phẩm |
+| `GET` | `/api/products/categories` | Danh mục sản phẩm |
+| `GET` | `/api/products/best-seller` | Sản phẩm bán chạy |
+| `GET` | `/api/products/most-viewed` | Sản phẩm xem nhiều |
+| `GET` | `/api/products/favorites` | Sản phẩm yêu thích của user |
+| `POST` | `/api/products/:productId/favorite` | Toggle yêu thích |
+| `GET` | `/api/products/recently-viewed` | Sản phẩm đã xem gần đây |
+| `POST` | `/api/products/:slug/viewed` | Ghi nhận đã xem |
+
+### Admin/manager sản phẩm
+
+| Method | Endpoint | Mô tả |
+| --- | --- | --- |
+| `GET` | `/api/admin/products` | Danh sách sản phẩm quản trị |
+| `POST` | `/api/admin/products` | Thêm sản phẩm |
+| `PATCH` | `/api/admin/products/:id` | Sửa sản phẩm |
+| `PATCH` | `/api/admin/products/:id/status` | Đổi trạng thái sản phẩm |
+| `DELETE` | `/api/admin/products/:id` | Xóa sản phẩm, chỉ admin theo middleware |
+
+### Giỏ hàng
+
+| Method | Endpoint | Mô tả |
+| --- | --- | --- |
+| `GET` | `/api/cart` | Lấy giỏ hàng hiện tại |
+| `POST` | `/api/cart/items` | Thêm sản phẩm vào giỏ |
+| `PATCH` | `/api/cart/items/:productId` | Cập nhật số lượng |
+| `DELETE` | `/api/cart/items/:productId` | Xóa một sản phẩm |
+| `DELETE` | `/api/cart` | Xóa toàn bộ giỏ |
+
+### Đơn hàng và thanh toán
+
+| Method | Endpoint | Mô tả |
+| --- | --- | --- |
+| `POST` | `/api/orders/checkout` | Đặt hàng |
+| `POST` | `/api/orders/checkout/preview` | Preview tổng tiền/voucher |
+| `GET` | `/api/orders/my` | Đơn hàng của tôi |
+| `GET` | `/api/orders/my/:orderIdOrCode` | Chi tiết đơn của tôi |
+| `PATCH` | `/api/orders/my/:orderIdOrCode/cancel` | Hủy/yêu cầu hủy đơn |
+| `POST` | `/api/orders/my/:orderIdOrCode/pay` | Thanh toán lại VNPAY |
+| `GET` | `/api/payments/vnpay-return` | VNPAY return |
+| `GET` | `/api/payments/vnpay-ipn` | VNPAY IPN |
+
+### Admin/manager đơn hàng và QR giao hàng
+
+| Method | Endpoint | Mô tả |
+| --- | --- | --- |
+| `GET` | `/api/admin/orders` | Danh sách đơn |
+| `GET` | `/api/admin/orders/:orderIdOrCode` | Chi tiết đơn |
+| `PATCH` | `/api/admin/orders/:orderIdOrCode/status` | Cập nhật trạng thái |
+| `PATCH` | `/api/admin/orders/:orderIdOrCode/cancel-request` | Duyệt/từ chối yêu cầu hủy |
+| `POST` | `/api/admin/orders/:orderIdOrCode/delivery-qr` | Tạo QR giao hàng |
+| `GET` | `/api/admin/orders/:orderIdOrCode/delivery-qr` | Lấy QR giao hàng |
+| `POST` | `/api/orders/delivery/verify` | Xác minh QR giao hàng |
+
+### Dashboard/settings/user management
+
+| Method | Endpoint | Mô tả |
+| --- | --- | --- |
+| `GET` | `/api/admin/dashboard/overview` | Tổng quan |
+| `GET` | `/api/admin/dashboard/revenue` | Doanh thu |
+| `GET` | `/api/admin/dashboard/order-status` | Trạng thái đơn |
+| `GET` | `/api/admin/dashboard/top-products` | Top sản phẩm |
+| `GET` | `/api/admin/dashboard/recent-orders` | Đơn gần đây |
+| `GET` | `/api/admin/dashboard/new-customers` | Khách hàng mới |
+| `GET` | `/api/admin/dashboard/cashflow` | Dòng tiền |
+| `GET` | `/api/admin/settings` | Lấy settings |
+| `PATCH` | `/api/admin/settings` | Cập nhật settings |
+| `GET` | `/api/admin/users` | Danh sách user |
+| `POST` | `/api/admin/users` | Tạo user |
+| `PUT` | `/api/admin/users/:id` | Cập nhật user |
+| `PATCH` | `/api/admin/users/:id/reset-password` | Reset mật khẩu user |
+| `DELETE` | `/api/admin/users/:id` | Xóa user |
+
+### Voucher, loyalty, review, notification
+
+| Method | Endpoint | Mô tả |
+| --- | --- | --- |
+| `GET` | `/api/vouchers/my` | Voucher khả dụng của khách |
+| `GET` | `/api/admin/vouchers` | Danh sách voucher quản trị |
+| `POST` | `/api/admin/vouchers` | Tạo voucher |
+| `GET` | `/api/admin/vouchers/:id` | Chi tiết voucher |
+| `PUT` | `/api/admin/vouchers/:id` | Sửa voucher |
+| `DELETE` | `/api/admin/vouchers/:id` | Xóa voucher |
+| `GET` | `/api/loyalty/me` | Điểm loyalty của tôi |
+| `GET` | `/api/reviews/products/:slug` | Review theo sản phẩm |
+| `POST` | `/api/reviews` | Tạo review |
+| `GET` | `/api/notifications` | Danh sách thông báo |
+| `PATCH` | `/api/notifications/read-all` | Đánh dấu tất cả đã đọc |
+| `PATCH` | `/api/notifications/:id/read` | Đánh dấu một thông báo đã đọc |
+
+### Chat, livestream và live chat
+
+Các API chat chính:
+
+| Method | Endpoint | Mô tả |
+| --- | --- | --- |
+| `POST` | `/api/chat/send` | Gửi tin nhắn |
+| `GET` | `/api/chat/support` | Lấy tài khoản hỗ trợ |
+| `GET` | `/api/chat/users` | Lấy danh sách user chat |
+| `GET` | `/api/chat/users/:id` | Lấy thông tin user chat |
+| `GET` | `/api/chat/history/:senderId/:receiverId` | Lịch sử chat |
+| `PATCH` | `/api/chat/read/:senderId` | Đánh dấu đã đọc |
+| `GET` | `/api/chat/contacts` | Danh sách contact chat |
+
+Livestream và live chat được khai báo trong:
+
+```text
+src/route/livestream.route.js
+```
+
+Các endpoint chính gồm:
+
+- Lấy livestream hiện tại.
+- Bắt đầu livestream.
+- Kết thúc livestream.
+- Xem lịch sử livestream.
+- Lấy tin nhắn live chat gần đây.
+- Quản lý moderation case.
+- Xử lý yêu cầu mở cấm live chat.
+
+## 12. Socket.io
+
+Socket.io được khởi tạo trên cùng HTTP server với Express.
+
+Các module dùng realtime:
+
+- Notification.
+- Chat hỗ trợ.
+- Livestream WebRTC signaling.
+- Live chat.
+- Kiểm duyệt live chat.
+
+Client thường join room bằng event:
+
+```text
+join
+```
+
+Payload dạng:
+
+```json
+{
+  "userId": "id-cua-user",
+  "roleId": "R1"
+}
+```
+
+Các màn hình frontend/admin đang sử dụng socket nằm ở:
+
+```text
+website-chatting-FE/src/services/socket.js
+website-chatting-FE/src/sockets/livestreamSocket.js
+website-chatting-ADMIN/src/services/socket.js
+website-chatting-ADMIN/src/sockets/livestreamSocket.js
+```
+
+## 13. Postman
+
+Thư mục `postman/` có các collection:
+
+```text
+BTVN_Register_BuiThanhTung.postman_collection.json
+BTVN_Login_VuMinhKhang.postman_collection.json
+BTVN_ForgotPassword_PhamPhucTien.postman_collection.json
+EditProfile.postman_collection.json
+```
+
+Cách dùng:
+
+1. Mở Postman.
+2. Import các file trong thư mục `postman/`.
+3. Đặt base URL là:
+
+```text
+http://localhost:8088
+```
+
+4. Chạy request theo đúng thứ tự của từng collection.
+
+## 14. Kiểm Thử
+
+### Test backend
+
+Script có sẵn:
+
+```bash
+npm test
+```
+
+Hiện repo chưa có thư mục `test/`, nên nhóm có thể bổ sung test vào:
+
+```text
+test/**/*.test.js
+```
+
+### Smoke test QR giao hàng
+
+```bash
+npm run test:delivery-qr
+```
+
+### Smoke test chat
+
+```bash
+npm run test:chat
+```
+
+### Test frontend/admin bằng Cypress
+
+Test E2E nằm ở hai repo frontend:
+
+```text
+website-chatting-FE/cypress/e2e/
+website-chatting-ADMIN/cypress/e2e/
+```
+
+Chạy customer Cypress:
+
+```bash
+cd website-chatting-FE
+npx cypress run
+```
+
+Chạy admin Cypress:
+
+```bash
+cd website-chatting-ADMIN
+npx cypress run
+```
+
+## 15. Luồng Demo Gợi Ý Khi Chấm Điểm
+
+1. Chạy backend `website-chatting`.
+2. Kiểm tra `http://localhost:8088/`.
+3. Chạy `website-chatting-FE` ở `http://localhost:5173`.
+4. Chạy `website-chatting-ADMIN` ở `http://localhost:5174`.
+5. Đăng nhập admin được seed từ `ADMIN_EMAIL` và `ADMIN_PASSWORD`.
+6. Trên admin: xem dashboard, quản lý sản phẩm, đơn hàng, voucher.
+7. Trên customer: đăng ký/đăng nhập, tìm sản phẩm, thêm giỏ, checkout.
+8. Trên admin: cập nhật trạng thái đơn và tạo QR giao hàng.
+9. Trên shipper: đăng nhập tài khoản `R4`, vào `/shipper/delivery`, quét QR.
+10. Trên admin: mở livestream.
+11. Trên customer: vào `/livestream`, xem live và gửi live chat.
+12. Trên admin/manager: kiểm duyệt live chat.
+13. Kiểm tra notification/chat realtime.
+
+## 16. Lỗi Thường Gặp
+
+### Không kết nối được MongoDB
+
+Kiểm tra:
+
+- MongoDB local đã chạy chưa.
+- `MONGO_DB_URL` có đúng chưa.
+- Nếu dùng Atlas, IP hiện tại đã được whitelist chưa.
+
+### Không seed được admin
+
+Kiểm tra:
+
+- `SEED_INITIAL_DATA=true`.
+- Có đủ `ADMIN_EMAIL` và `ADMIN_PASSWORD`.
+- MongoDB đã kết nối thành công.
+
+### Frontend báo lỗi CORS hoặc không gọi được API
+
+Kiểm tra:
+
+- Backend có chạy ở `8088` không.
+- FE có `VITE_BACKEND_URL=http://localhost:8088/api` không.
+- Admin portal có chạy đúng `5174` không.
+- Nếu đổi port, cần cập nhật CORS/proxy/env tương ứng.
+
+### OTP/email không gửi được
+
+Kiểm tra:
+
+- `EMAIL_USER`.
+- `EMAIL_PASS`.
+- Nếu dùng Gmail, cần app password thay vì mật khẩu Gmail thường.
+
+### Token lỗi hoặc bị logout liên tục
+
+Nguyên nhân thường gặp:
+
+- Đổi JWT secret.
+- Refresh token hết hạn hoặc bị xóa.
+- LocalStorage còn token cũ.
+
+Cách xử lý:
+
+- Xóa localStorage ở trình duyệt.
+- Đăng nhập lại.
+
+### VNPAY không return đúng
+
+Kiểm tra:
+
+- Credentials VNPAY sandbox.
+- URL return/IPN.
+- Đồng bộ thời gian máy.
+- Backend có mở port mà VNPAY sandbox có thể gọi tới không nếu test IPN thật.
+
+### QR giao hàng xác minh thất bại
+
+Kiểm tra:
+
+- QR có được tạo từ đúng đơn hàng không.
+- `DELIVERY_QR_ENCRYPTION_SECRET` có bị đổi sau khi tạo QR không.
+- Đơn hàng có ở trạng thái cho phép xác minh không.
+- Tài khoản xác minh có đúng role `R2` hoặc `R4` không.
+
+## 17. Ghi Chú Phát Triển
+
+- Không commit `.env`.
+- Khi đổi port backend, cần cập nhật:
+  - `website-chatting-FE/.env`
+  - `website-chatting-ADMIN/.env` nếu có
+  - `vite.config.js` proxy nếu cần
+  - Cypress `baseUrl` nếu đổi port frontend
+- Khi sửa API auth, cần test lại interceptor refresh token ở cả FE và ADMIN.
+- Khi sửa order/payment, nên test cả COD, VNPAY return, retry payment và admin update status.
+- Khi sửa chat/livestream, cần test cả REST API và Socket.io.
+- Khi sửa QR giao hàng, nên chạy smoke test `npm run test:delivery-qr`.
+- Khi sửa UI customer/admin, nên chạy Cypress ở repo tương ứng.
